@@ -1,7 +1,6 @@
 name = "etch-cms"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
-compatibility_flags = ["nodejs_compat"]
 
 [triggers]
 crons = ["* * * * *"]
@@ -12,7 +11,7 @@ bucket = "./client/dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "etch-cms-db"
-database_id = "" # fill in after running: wrangler d1 create etch-cms-db
+database_id = "134c3d7d-0578-4184-a71c-0d7259e61e09" # fill in after running: wrangler d1 create etch-cms-db
 migrations_dir = "migrations"
 
 [[r2_buckets]]

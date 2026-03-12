@@ -230,12 +230,14 @@ Wrangler loads `.dev.vars` automatically during `wrangler dev`. Add it to `.giti
 # Admin username
 wrangler secret put ADMIN_USERNAME
 
-# Admin password hash — generate with:
-#   node -e "const {pbkdf2Sync,randomBytes}=require('crypto');const s=randomBytes(16);console.log('pbkdf2:'+s.toString('hex')+':'+pbkdf2Sync('yourpassword',s,200000,32,'sha256').toString('hex'))"
+# Admin password hash
+# First generate the hash (replace YOUR_PASSWORD):
+node -e "const c=require('node:crypto'); const s=c.randomBytes(16); console.log('pbkdf2:'+s.toString('hex')+':'+c.pbkdf2Sync('YOUR_PASSWORD',s,100000,32,'sha256').toString('hex'))"
+# Then set it:
 wrangler secret put ADMIN_PASSWORD_HASH
 
-# JWT secret — generate with:
-#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# JWT signing secret
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 wrangler secret put JWT_SECRET
 ```
 
