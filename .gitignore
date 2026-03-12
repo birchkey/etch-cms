@@ -4,6 +4,8 @@
 
 # Dependencies
 node_modules/
+package-lock.json
+client/package-lock.json
 
 # Build output
 client/dist/
