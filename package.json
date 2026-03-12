@@ -1,0 +1,25 @@
+{
+  "name": "etch-cms",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "eslint": "^10.0.2",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18",
+    "wrangler": "^3.90.0"
+  }
+}

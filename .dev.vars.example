@@ -1,0 +1,9 @@
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=pbkdf2:your-salt-hex:your-hash-hex
+JWT_SECRET=your-jwt-secret-hex
+
+# Generate a password hash:
+#   node -e "const {pbkdf2Sync,randomBytes}=require('crypto');const s=randomBytes(16);console.log('pbkdf2:'+s.toString('hex')+':'+pbkdf2Sync('yourpassword',s,200000,32,'sha256').toString('hex'))"
+
+# Generate a JWT secret:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"

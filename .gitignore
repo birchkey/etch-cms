@@ -1,0 +1,17 @@
+# Secrets
+.dev.vars
+.env
+
+# Dependencies
+node_modules/
+
+# Build output
+client/dist/
+dist/
+
+# Wrangler
+.wrangler/
+
+# OS
+.DS_Store
+.claude
