@@ -366,11 +366,12 @@ export interface Asset {
 }
 
 export const assetsApi = {
-  list: (opts?: { page?: number; limit?: number; search?: string }) => {
+  list: (opts?: { page?: number; limit?: number; search?: string; filename?: string }) => {
     const params = new URLSearchParams();
     if (opts?.page) params.set('page', String(opts.page));
     if (opts?.limit) params.set('limit', String(opts.limit));
     if (opts?.search) params.set('search', opts.search);
+    if (opts?.filename) params.set('filename', opts.filename);
     const qs = params.toString();
     return request<PaginatedResponse<Asset>>(`/assets${qs ? `?${qs}` : ''}`);
   },

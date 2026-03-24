@@ -55,12 +55,12 @@ export function AssetPicker({ open, onClose, onSelect }: AssetPickerProps) {
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl flex flex-col max-h-[90vh]">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Select Asset</DialogTitle>
         </DialogHeader>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-400" />
             <Input
@@ -90,7 +90,8 @@ export function AssetPicker({ open, onClose, onSelect }: AssetPickerProps) {
             No assets found. Upload one to get started.
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-3 max-h-96 overflow-y-auto">
+          <div className="overflow-y-auto flex-1 min-h-0">
+          <div className="grid grid-cols-3 gap-3">
             {filtered.map(asset => {
               const url = assetsApi.url(asset.r2_key);
               const isImage = asset.content_type.startsWith('image/');
@@ -118,6 +119,7 @@ export function AssetPicker({ open, onClose, onSelect }: AssetPickerProps) {
                 </button>
               );
             })}
+          </div>
           </div>
         )}
       </DialogContent>

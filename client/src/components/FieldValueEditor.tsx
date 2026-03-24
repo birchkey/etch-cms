@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Field, contentTypesApi } from '@/lib/api';
+import { Field, contentTypesApi, assetsApi } from '@/lib/api';
 import { Input } from './ui/input';
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
@@ -7,7 +7,57 @@ import { RichTextEditor } from './RichTextEditor';
 import { AssetPicker } from './AssetPicker';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Image as ImageIcon, X, Plus, ExternalLink } from 'lucide-react';
+import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File } from 'lucide-react';
+
+function assetTypeFromUrl(url: string): 'image' | 'video' | 'pdf' | 'file' {
+  const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'svg'].includes(ext)) return 'image';
+  if (['mp4', 'webm', 'mov', 'avi'].includes(ext)) return 'video';
+  if (ext === 'pdf') return 'pdf';
+  return 'file';
+}
+
+function filenameFromUrl(url: string): string {
+  return decodeURIComponent(url.split('?')[0].split('/').pop() ?? url);
+}
+
+// Module-level cache so repeated renders don't re-fetch
+const assetNameCache = new Map<string, string>();
+
+function useAssetName(url: string | null): string | null {
+  const [name, setName] = useState<string | null>(() => (url ? assetNameCache.get(url) ?? null : null));
+  useEffect(() => {
+    if (!url || assetNameCache.has(url)) return;
+    const filename = filenameFromUrl(url);
+    assetsApi.list({ filename, limit: 1 })
+      .then(res => {
+        const originalName = res.data[0]?.original_name ?? null;
+        if (originalName) {
+          assetNameCache.set(url, originalName);
+          setName(originalName);
+        }
+      })
+      .catch(() => {});
+  }, [url]);
+  return name;
+}
+
+function AssetThumbnail({ url, name, className }: { url: string; name?: string | null; className?: string }) {
+  const type = assetTypeFromUrl(url);
+  if (type === 'image') {
+    return <img src={url} alt="" className={className} />;
+  }
+  const Icon = type === 'video' ? Film : type === 'pdf' ? FileText : File;
+  const label = type === 'video' ? 'Video' : type === 'pdf' ? 'PDF' : 'File';
+  const displayName = name ?? filenameFromUrl(url);
+  return (
+    <div className={`flex flex-col items-center justify-center gap-1.5 bg-zinc-50 text-zinc-400 ${className ?? ''}`}>
+      <Icon className="h-8 w-8" />
+      <span className="text-xs font-medium text-zinc-500">{label}</span>
+      <span className="text-[10px] text-zinc-400 text-center px-2 line-clamp-2 break-all">{displayName}</span>
+    </div>
+  );
+}
 
 interface FieldValueEditorProps {
   field: Field;
@@ -148,13 +198,21 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
 
 function ImageFieldEditor({ value, onChange }: { value: string | null; onChange: (v: unknown) => void }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const isImage = value ? assetTypeFromUrl(value) === 'image' : false;
+  const assetName = useAssetName(!isImage ? value : null);
 
   return (
     <div className="space-y-3">
       {value ? (
         <div className="inline-flex flex-col items-start gap-2">
           <div className="relative">
-            <img src={value} alt="Selected" className="max-h-48 rounded-md border border-zinc-200" />
+            {isImage ? (
+              <img src={value} alt="Selected" className="max-h-48 rounded-md border border-zinc-200" />
+            ) : (
+              <div className="w-48 h-36 rounded-md border border-zinc-200 overflow-hidden">
+                <AssetThumbnail url={value} name={assetName} className="w-full h-full" />
+              </div>
+            )}
             <button
               type="button"
               onClick={() => onChange(null)}
@@ -163,9 +221,21 @@ function ImageFieldEditor({ value, onChange }: { value: string | null; onChange:
               <X className="h-3 w-3" />
             </button>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
-            Change image
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
+              Change asset
+            </Button>
+            {!isImage && (
+              <a
+                href={value}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-zinc-500 hover:text-zinc-700 underline underline-offset-2"
+              >
+                Open file
+              </a>
+            )}
+          </div>
         </div>
       ) : (
         <div
@@ -173,7 +243,7 @@ function ImageFieldEditor({ value, onChange }: { value: string | null; onChange:
           className="border-2 border-dashed border-zinc-200 rounded-md p-8 flex flex-col items-center gap-2 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors"
         >
           <ImageIcon className="h-8 w-8 text-zinc-300" />
-          <span className="text-sm text-zinc-500">Click to select image</span>
+          <span className="text-sm text-zinc-500">Click to select asset</span>
         </div>
       )}
       <AssetPicker
@@ -186,6 +256,12 @@ function ImageFieldEditor({ value, onChange }: { value: string | null; onChange:
       />
     </div>
   );
+}
+
+function AssetThumbnailWithName({ url }: { url: string }) {
+  const isImage = assetTypeFromUrl(url) === 'image';
+  const name = useAssetName(!isImage ? url : null);
+  return <AssetThumbnail url={url} name={name} className={isImage ? 'w-full h-full object-cover' : 'w-full h-full'} />;
 }
 
 function MultiImageEditor({ value, onChange }: { value: string[] | null; onChange: (v: unknown) => void }) {
@@ -202,7 +278,9 @@ function MultiImageEditor({ value, onChange }: { value: string[] | null; onChang
         <div className="flex flex-wrap gap-3">
           {images.map((url, i) => (
             <div key={i} className="relative">
-              <img src={url} alt={`Image ${i + 1}`} className="h-32 w-32 object-cover rounded-md border border-zinc-200" />
+              <div className="h-32 w-32 rounded-md border border-zinc-200 overflow-hidden">
+                <AssetThumbnailWithName url={url} />
+              </div>
               <button
                 type="button"
                 onClick={() => remove(i)}
@@ -216,7 +294,7 @@ function MultiImageEditor({ value, onChange }: { value: string[] | null; onChang
       )}
       <Button type="button" variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
         <ImageIcon className="h-4 w-4 mr-2" />
-        {images.length === 0 ? 'Add image' : 'Add another image'}
+        {images.length === 0 ? 'Add asset' : 'Add another asset'}
       </Button>
       <AssetPicker
         open={pickerOpen}

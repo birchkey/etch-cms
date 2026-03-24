@@ -41,9 +41,10 @@ assets.get('/', async (c) => {
   const limit = Math.min(1000, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10) || 50));
   const offset = (page - 1) * limit;
   const search = c.req.query('search')?.trim() ?? '';
+  const filename = c.req.query('filename')?.trim() ?? '';
 
-  const whereClause = search ? 'WHERE original_name LIKE ?' : '';
-  const searchBinding = search ? [`%${search}%`] : [];
+  const whereClause = filename ? 'WHERE filename = ?' : search ? 'WHERE original_name LIKE ?' : '';
+  const searchBinding = filename ? [filename] : search ? [`%${search}%`] : [];
 
   const countRow = await c.env.DB.prepare(
     `SELECT COUNT(*) as count FROM assets ${whereClause}`
