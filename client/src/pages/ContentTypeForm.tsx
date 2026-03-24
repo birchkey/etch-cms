@@ -8,6 +8,21 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Plus, GripVertical, Trash2, Loader2, ChevronLeft, X } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { usePageTitle } from '@/lib/settings';
@@ -124,6 +139,19 @@ export default function ContentTypeForm() {
     setFields(prev => prev.filter(f => f._key !== key));
   };
 
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setFields(prev => {
+        const oldIndex = prev.findIndex(f => f._key === active.id);
+        const newIndex = prev.findIndex(f => f._key === over.id);
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return toast.error('Name is required');
@@ -236,270 +264,15 @@ export default function ContentTypeForm() {
               No fields yet. Add a field to define your content structure.
             </div>
           ) : (
-            <div className="space-y-3">
-              {fields.map((field, _i) => (
-                <div key={field._key} className="border border-zinc-200 rounded-lg p-4 space-y-3 bg-zinc-50">
-                  <div className="flex items-center gap-2">
-                    <GripVertical className="h-4 w-4 text-zinc-300 shrink-0" />
-                    <div className="flex-1 grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Field Name</Label>
-                        <Input
-                          value={field.name}
-                          onChange={e => updateField(field._key, { name: e.target.value })}
-                          placeholder="Title"
-                          className="h-8 text-sm"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Type</Label>
-                        <Select
-                          value={field.type}
-                          onValueChange={v => updateField(field._key, { type: v })}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {FIELD_TYPES.map(t => (
-                              <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeField(field._key)}
-                      className="p-1 text-zinc-400 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-4 ml-6">
-                    <div className="flex items-center gap-2 mt-4">
-                      <Switch
-                        checked={!!field.required}
-                        onCheckedChange={v => updateField(field._key, { required: v })}
-                      />
-                      <Label className="text-xs">Required</Label>
-                    </div>
-                    {(field.type === 'image' || field.type === 'select') && (
-                      <div className="flex items-center gap-2 mt-4">
-                        <Switch
-                          checked={!!field.multiple}
-                          onCheckedChange={v => updateField(field._key, { multiple: v })}
-                        />
-                        <Label className="text-xs">
-                          {field.type === 'image' ? 'Multiple images' : 'Allow multiple'}
-                        </Label>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Rich text extension picker */}
-                  {field.type === 'rich_text' && (
-                    <div className="ml-6 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={field.rich_text_extensions_draft !== null}
-                          onCheckedChange={v =>
-                            updateField(field._key, {
-                              rich_text_extensions_draft: v
-                                ? ALL_RICH_TEXT_EXTENSIONS.map(e => e.key)
-                                : null,
-                            })
-                          }
-                        />
-                        <Label className="text-xs">Restrict formatting options</Label>
-                      </div>
-                      {field.rich_text_extensions_draft !== null && (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 pt-1">
-                          {ALL_RICH_TEXT_EXTENSIONS.map(ext => {
-                            const checked = field.rich_text_extensions_draft?.includes(ext.key) ?? false;
-                            return (
-                              <label key={ext.key} className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={e => {
-                                    const current = field.rich_text_extensions_draft ?? [];
-                                    const next = e.target.checked
-                                      ? [...current, ext.key]
-                                      : current.filter(k => k !== ext.key);
-                                    updateField(field._key, { rich_text_extensions_draft: next });
-                                  }}
-                                  className="rounded border-zinc-300"
-                                />
-                                <span className="text-xs text-zinc-600">{ext.label}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Select options */}
-                  {field.type === 'select' && (
-                    <div className="ml-6 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs">Options</Label>
-                        <button
-                          type="button"
-                          onClick={() => updateField(field._key, {
-                            select_options_draft: [...field.select_options_draft, ''],
-                          })}
-                          className="text-xs text-indigo-600 hover:text-indigo-800"
-                        >
-                          + Add option
-                        </button>
-                      </div>
-                      {field.select_options_draft.length === 0 ? (
-                        <p className="text-xs text-zinc-400">No options yet.</p>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {field.select_options_draft.map((opt, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <Input
-                                value={opt}
-                                onChange={e => {
-                                  const next = [...field.select_options_draft];
-                                  next[i] = e.target.value;
-                                  updateField(field._key, { select_options_draft: next });
-                                }}
-                                placeholder="Option label"
-                                className="h-7 text-xs flex-1"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => updateField(field._key, {
-                                  select_options_draft: field.select_options_draft.filter((_, j) => j !== i),
-                                })}
-                                className="text-zinc-400 hover:text-red-500"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Validation rules */}
-                  {(field.type === 'text' || field.type === 'rich_text') && (
-                    <div className="ml-6 grid grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Min length</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={field.min_length ?? ''}
-                          onChange={e => updateField(field._key, { min_length: e.target.value ? Number(e.target.value) : null })}
-                          placeholder="—"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Max length</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={field.max_length ?? ''}
-                          onChange={e => updateField(field._key, { max_length: e.target.value ? Number(e.target.value) : null })}
-                          placeholder="—"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Pattern (regex)</Label>
-                        <Input
-                          value={field.pattern ?? ''}
-                          onChange={e => updateField(field._key, { pattern: e.target.value || null })}
-                          placeholder="—"
-                          className="h-7 text-xs font-mono"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {field.type === 'number' && (
-                    <div className="ml-6 grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Min value</Label>
-                        <Input
-                          type="number"
-                          value={field.min_value ?? ''}
-                          onChange={e => updateField(field._key, { min_value: e.target.value ? Number(e.target.value) : null })}
-                          placeholder="—"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Max value</Label>
-                        <Input
-                          type="number"
-                          value={field.max_value ?? ''}
-                          onChange={e => updateField(field._key, { max_value: e.target.value ? Number(e.target.value) : null })}
-                          placeholder="—"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Relation config */}
-                  {field.type === 'relation' && (
-                    <div className="ml-6 grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Collection</Label>
-                        <Select
-                          value={field.relation_content_type_id ?? ''}
-                          onValueChange={v => updateField(field._key, { relation_content_type_id: v || null })}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Select collection..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {allContentTypes.map(ct => (
-                              <SelectItem key={ct.id} value={ct.id}>{ct.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">How many</Label>
-                        <Select
-                          value={field.relation_cardinality ?? 'one'}
-                          onValueChange={v => updateField(field._key, { relation_cardinality: v as 'one' | 'many' })}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="one">One item</SelectItem>
-                            <SelectItem value="many">Multiple items</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* API key */}
-                  <div className="ml-6 space-y-1">
-                    <Label className="text-xs">API key</Label>
-                    <Input
-                      value={field.slug ?? slugifyUnderscore(field.name)}
-                      onChange={e => updateField(field._key, { slug: e.target.value })}
-                      placeholder={slugifyUnderscore(field.name) || 'field_key'}
-                      className="h-7 text-xs font-mono w-36"
-                    />
-                    <p className="text-xs text-zinc-400">Used as the key in the API response.</p>
-                  </div>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={fields.map(f => f._key)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-3">
+                  {fields.map((field, _i) => (
+                    <SortableFieldRow key={field._key} field={field} updateField={updateField} removeField={removeField} allContentTypes={allContentTypes} />
+                  ))}
                 </div>
-              ))}
-            </div>
+              </SortableContext>
+            </DndContext>
           )}
         </div>
 
@@ -513,6 +286,290 @@ export default function ContentTypeForm() {
           </Button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function SortableFieldRow({
+  field,
+  updateField,
+  removeField,
+  allContentTypes,
+}: {
+  field: FieldDraft;
+  updateField: (key: string, updates: Partial<FieldDraft>) => void;
+  removeField: (key: string) => void;
+  allContentTypes: ContentType[];
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field._key });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="border border-zinc-200 rounded-lg p-4 space-y-3 bg-zinc-50">
+      <div className="flex items-center gap-2">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing touch-none p-0.5 text-zinc-300 hover:text-zinc-500">
+          <GripVertical className="h-4 w-4 shrink-0" />
+        </button>
+        <div className="flex-1 grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Field Name</Label>
+            <Input
+              value={field.name}
+              onChange={e => updateField(field._key, { name: e.target.value })}
+              placeholder="Title"
+              className="h-8 text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Type</Label>
+            <Select
+              value={field.type}
+              onValueChange={v => updateField(field._key, { type: v })}
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FIELD_TYPES.map(t => (
+                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => removeField(field._key)}
+          className="p-1 text-zinc-400 hover:text-red-500 transition-colors"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-4 ml-6">
+        <div className="flex items-center gap-2 mt-4">
+          <Switch
+            checked={!!field.required}
+            onCheckedChange={v => updateField(field._key, { required: v })}
+          />
+          <Label className="text-xs">Required</Label>
+        </div>
+        {(field.type === 'image' || field.type === 'select') && (
+          <div className="flex items-center gap-2 mt-4">
+            <Switch
+              checked={!!field.multiple}
+              onCheckedChange={v => updateField(field._key, { multiple: v })}
+            />
+            <Label className="text-xs">
+              {field.type === 'image' ? 'Multiple images' : 'Allow multiple'}
+            </Label>
+          </div>
+        )}
+      </div>
+
+      {/* Rich text extension picker */}
+      {field.type === 'rich_text' && (
+        <div className="ml-6 space-y-2">
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={field.rich_text_extensions_draft !== null}
+              onCheckedChange={v =>
+                updateField(field._key, {
+                  rich_text_extensions_draft: v
+                    ? ALL_RICH_TEXT_EXTENSIONS.map(e => e.key)
+                    : null,
+                })
+              }
+            />
+            <Label className="text-xs">Restrict formatting options</Label>
+          </div>
+          {field.rich_text_extensions_draft !== null && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 pt-1">
+              {ALL_RICH_TEXT_EXTENSIONS.map(ext => {
+                const checked = field.rich_text_extensions_draft?.includes(ext.key) ?? false;
+                return (
+                  <label key={ext.key} className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={e => {
+                        const current = field.rich_text_extensions_draft ?? [];
+                        const next = e.target.checked
+                          ? [...current, ext.key]
+                          : current.filter(k => k !== ext.key);
+                        updateField(field._key, { rich_text_extensions_draft: next });
+                      }}
+                      className="rounded border-zinc-300"
+                    />
+                    <span className="text-xs text-zinc-600">{ext.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Select options */}
+      {field.type === 'select' && (
+        <div className="ml-6 space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Options</Label>
+            <button
+              type="button"
+              onClick={() => updateField(field._key, {
+                select_options_draft: [...field.select_options_draft, ''],
+              })}
+              className="text-xs text-indigo-600 hover:text-indigo-800"
+            >
+              + Add option
+            </button>
+          </div>
+          {field.select_options_draft.length === 0 ? (
+            <p className="text-xs text-zinc-400">No options yet.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {field.select_options_draft.map((opt, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input
+                    value={opt}
+                    onChange={e => {
+                      const next = [...field.select_options_draft];
+                      next[i] = e.target.value;
+                      updateField(field._key, { select_options_draft: next });
+                    }}
+                    placeholder="Option label"
+                    className="h-7 text-xs flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => updateField(field._key, {
+                      select_options_draft: field.select_options_draft.filter((_, j) => j !== i),
+                    })}
+                    className="text-zinc-400 hover:text-red-500"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Validation rules */}
+      {(field.type === 'text' || field.type === 'rich_text') && (
+        <div className="ml-6 grid grid-cols-3 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Min length</Label>
+            <Input
+              type="number"
+              min={0}
+              value={field.min_length ?? ''}
+              onChange={e => updateField(field._key, { min_length: e.target.value ? Number(e.target.value) : null })}
+              placeholder="—"
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Max length</Label>
+            <Input
+              type="number"
+              min={0}
+              value={field.max_length ?? ''}
+              onChange={e => updateField(field._key, { max_length: e.target.value ? Number(e.target.value) : null })}
+              placeholder="—"
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Pattern (regex)</Label>
+            <Input
+              value={field.pattern ?? ''}
+              onChange={e => updateField(field._key, { pattern: e.target.value || null })}
+              placeholder="—"
+              className="h-7 text-xs font-mono"
+            />
+          </div>
+        </div>
+      )}
+      {field.type === 'number' && (
+        <div className="ml-6 grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Min value</Label>
+            <Input
+              type="number"
+              value={field.min_value ?? ''}
+              onChange={e => updateField(field._key, { min_value: e.target.value ? Number(e.target.value) : null })}
+              placeholder="—"
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Max value</Label>
+            <Input
+              type="number"
+              value={field.max_value ?? ''}
+              onChange={e => updateField(field._key, { max_value: e.target.value ? Number(e.target.value) : null })}
+              placeholder="—"
+              className="h-7 text-xs"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Relation config */}
+      {field.type === 'relation' && (
+        <div className="ml-6 grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Collection</Label>
+            <Select
+              value={field.relation_content_type_id ?? ''}
+              onValueChange={v => updateField(field._key, { relation_content_type_id: v || null })}
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue placeholder="Select collection..." />
+              </SelectTrigger>
+              <SelectContent>
+                {allContentTypes.map(ct => (
+                  <SelectItem key={ct.id} value={ct.id}>{ct.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">How many</Label>
+            <Select
+              value={field.relation_cardinality ?? 'one'}
+              onValueChange={v => updateField(field._key, { relation_cardinality: v as 'one' | 'many' })}
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="one">One item</SelectItem>
+                <SelectItem value="many">Multiple items</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      {/* API key */}
+      <div className="ml-6 space-y-1">
+        <Label className="text-xs">API key</Label>
+        <Input
+          value={field.slug ?? slugifyUnderscore(field.name)}
+          onChange={e => updateField(field._key, { slug: e.target.value })}
+          placeholder={slugifyUnderscore(field.name) || 'field_key'}
+          className="h-7 text-xs font-mono w-36"
+        />
+        <p className="text-xs text-zinc-400">Used as the key in the API response.</p>
+      </div>
     </div>
   );
 }
