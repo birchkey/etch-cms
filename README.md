@@ -216,13 +216,14 @@ wrangler d1 migrations apply etch-cms-db --remote
 
 ### 4. Configure secrets
 
-**For local development**, copy the example env file and fill in your values:
+**For local development**, copy the example env file, then use the included script to generate and write the password hash directly to `.dev.vars`:
 
 ```bash
 cp .dev.vars.example .dev.vars
+node scripts/hash-password.mjs yourpassword
 ```
 
-Wrangler loads `.dev.vars` automatically during `wrangler dev`. Add it to `.gitignore`.
+The script writes `ADMIN_PASSWORD_HASH` to `.dev.vars` automatically and prints the value. Wrangler loads `.dev.vars` during `wrangler dev` — add it to `.gitignore`.
 
 **For production**, set secrets via Wrangler:
 
@@ -230,10 +231,8 @@ Wrangler loads `.dev.vars` automatically during `wrangler dev`. Add it to `.giti
 # Admin username
 wrangler secret put ADMIN_USERNAME
 
-# Admin password hash
-# First generate the hash (replace YOUR_PASSWORD):
-node -e "const c=require('node:crypto'); const s=c.randomBytes(16); console.log('pbkdf2:'+s.toString('hex')+':'+c.pbkdf2Sync('YOUR_PASSWORD',s,100000,32,'sha256').toString('hex'))"
-# Then set it:
+# Admin password hash — generate with the included script, then copy the printed hash value:
+node scripts/hash-password.mjs yourpassword
 wrangler secret put ADMIN_PASSWORD_HASH
 
 # JWT signing secret
