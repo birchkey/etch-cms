@@ -127,7 +127,7 @@ export interface Field {
   content_type_id: string;
   name: string;
   slug: string;
-  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select';
+  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color';
   required: number;
   sort_order: number;
   relation_content_type_id: string | null;
@@ -140,6 +140,7 @@ export interface Field {
   min_value: number | null;
   max_value: number | null;
   pattern: string | null;
+  phone_format: 'us' | 'international' | null;
   created_at: number;
 }
 
@@ -171,6 +172,7 @@ export interface FieldInput {
   min_value?: number | null;
   max_value?: number | null;
   pattern?: string | null;
+  phone_format?: 'us' | 'international' | null;
 }
 
 export const contentTypesApi = {

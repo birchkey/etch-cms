@@ -37,10 +37,11 @@ export interface FieldRow {
   min_value: number | null;
   max_value: number | null;
   pattern: string | null;
+  phone_format: 'us' | 'international' | null;
   created_at: number;
 }
 
-export type FieldType = 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select';
+export type FieldType = 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color';
 
 export interface EntryRow {
   id: string;

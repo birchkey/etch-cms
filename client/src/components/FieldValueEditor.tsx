@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { Field, contentTypesApi, assetsApi } from '@/lib/api';
 import { Input } from './ui/input';
 import { Switch } from './ui/switch';
@@ -89,6 +90,26 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
         />
       );
     }
+
+    case 'email':
+      return (
+        <Input
+          type="email"
+          value={(value as string) ?? ''}
+          onChange={e => onChange(e.target.value)}
+          placeholder="name@example.com"
+        />
+      );
+
+    case 'phone':
+      return (
+        field.phone_format === 'international'
+          ? <PhoneInputInternational value={(value as string) ?? ''} onChange={onChange} />
+          : <PhoneInputUS value={(value as string) ?? ''} onChange={onChange} />
+      );
+
+    case 'color':
+      return <ColorInput value={(value as string) ?? ''} onChange={onChange} />;
 
     case 'number':
       return (
@@ -194,6 +215,110 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
         />
       );
   }
+}
+
+function formatUS(digits: string): string {
+  digits = digits.slice(0, 10);
+  if (digits.length >= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length >= 3) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  if (digits.length > 0) return `(${digits}`;
+  return '';
+}
+
+function PhoneInputUS({ value, onChange }: { value: string; onChange: (v: unknown) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const allowed = ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter',
+      'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+    if (allowed.includes(e.key)) return;
+    if ((e.ctrlKey || e.metaKey) && ['a', 'c', 'v', 'x'].includes(e.key.toLowerCase())) return;
+    if (!/\d/.test(e.key)) e.preventDefault();
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const prevDigits = (value ?? '').replace(/\D/g, '');
+    const rawDigits = e.target.value.replace(/\D/g, '');
+    let digits = rawDigits.slice(0, 10);
+    // Digit count unchanged but string shrank → backspace hit a separator, remove one digit
+    if (rawDigits.length === prevDigits.length && prevDigits.length > 0 && rawDigits.length <= 10) {
+      digits = digits.slice(0, -1);
+    }
+    const formatted = formatUS(digits);
+    onChange(formatted);
+    requestAnimationFrame(() => {
+      inputRef.current?.setSelectionRange(formatted.length, formatted.length);
+    });
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const digits = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 10);
+    onChange(formatUS(digits));
+  };
+
+  return (
+    <Input
+      ref={inputRef}
+      type="tel"
+      value={value}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
+      placeholder="(555) 000-0000"
+      inputMode="numeric"
+    />
+  );
+}
+
+function PhoneInputInternational({ value, onChange }: { value: string; onChange: (v: unknown) => void }) {
+  const handleBlur = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+    const raw = e.target.value.trim();
+    if (!raw) return;
+    const parsed = parsePhoneNumberFromString(raw);
+    if (parsed?.isValid()) onChange(parsed.formatInternational());
+  }, [onChange]);
+
+  return (
+    <Input
+      type="tel"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      onBlur={handleBlur}
+      placeholder="+1 555 000 0000"
+    />
+  );
+}
+
+function ColorInput({ value, onChange }: { value: string; onChange: (v: unknown) => void }) {
+  const colorRef = useRef<HTMLInputElement>(null);
+  const isValid = /^#[0-9A-Fa-f]{6}$/.test(value);
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => colorRef.current?.click()}
+        className="h-9 w-9 rounded-md border border-zinc-200 shrink-0 hover:opacity-80 transition-opacity"
+        style={{ backgroundColor: isValid ? value : '#e4e4e7' }}
+        title="Pick color"
+      />
+      <input
+        ref={colorRef}
+        type="color"
+        value={isValid ? value : '#000000'}
+        onChange={e => onChange(e.target.value)}
+        className="sr-only"
+      />
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="#000000"
+        className="w-32 font-mono"
+        maxLength={7}
+      />
+    </div>
+  );
 }
 
 function ImageFieldEditor({ value, onChange }: { value: string | null; onChange: (v: unknown) => void }) {

@@ -52,6 +52,9 @@ const ALL_RICH_TEXT_EXTENSIONS = [
 const FIELD_TYPES = [
   { value: 'text', label: 'Text' },
   { value: 'rich_text', label: 'Rich Text' },
+  { value: 'email', label: 'Email' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'color', label: 'Color' },
   { value: 'image', label: 'Image' },
   { value: 'number', label: 'Number' },
   { value: 'datetime', label: 'Date & Time' },
@@ -127,6 +130,7 @@ export default function ContentTypeForm() {
         min_value: null,
         max_value: null,
         pattern: null,
+        phone_format: null,
       },
     ]);
   };
@@ -178,6 +182,7 @@ export default function ContentTypeForm() {
       min_value: f.min_value ?? null,
       max_value: f.max_value ?? null,
       pattern: f.pattern ?? null,
+      phone_format: f.phone_format ?? null,
     }));
 
     try {
@@ -556,6 +561,25 @@ function SortableFieldRow({
               </SelectContent>
             </Select>
           </div>
+        </div>
+      )}
+
+      {/* Phone format */}
+      {field.type === 'phone' && (
+        <div className="ml-6 space-y-1">
+          <Label className="text-xs">Format</Label>
+          <Select
+            value={field.phone_format ?? 'us'}
+            onValueChange={v => updateField(field._key, { phone_format: v as 'us' | 'international' })}
+          >
+            <SelectTrigger className="h-8 text-sm w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="us">US — (555) 123-4567</SelectItem>
+              <SelectItem value="international">International — +1 555 123 4567</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       )}
 

@@ -24,7 +24,7 @@ The result is a CMS that's effectively free to run at low-to-moderate traffic, g
 ## Features
 
 - **Custom content types** — define schemas with any combination of field types
-- **8 field types** — text, rich text, image (single or multiple), number, datetime, boolean, relation (one-to-many), select
+- **11 field types** — text, rich text, email, phone, image (single or multiple), number, datetime, boolean, relation (one-to-many), select, color
 - **Draft / Published / Scheduled** workflow — published entries track unpublished edits separately so you can stage changes without taking content offline
 - **Asset management** — upload images (JPEG, PNG, WebP, GIF, AVIF, SVG), PDFs, and video (MP4, WebM) to R2 with alt text support; magic-byte validation prevents MIME spoofing
 - **Webhooks** — HMAC-SHA256 signed payloads, automatic retry, delivery logs, test-fire button
@@ -261,6 +261,25 @@ cd client && npm run dev
 
 Open `http://localhost:5173`.
 
+### Pulling production data locally
+
+To develop against real content, you can export the production D1 database and import it into your local environment:
+
+```bash
+# Export production DB to a local SQL file
+npx wrangler d1 export etch-cms-db --remote --output=./prod-backup.sql
+
+# Wipe the local DB and replace it with the production export
+rm -rf .wrangler/state/v3/d1
+npx wrangler d1 execute etch-cms-db --local --file=./prod-backup.sql
+```
+
+The export includes the full schema and data. You don't need to re-run migrations afterward.
+
+**Note:** Secrets (`ADMIN_PASSWORD_HASH`, `JWT_SECRET`, etc.) are stored as Wrangler secrets, not in the database, so the export contains no credentials. Your local login still uses the values in `.dev.vars`.
+
+`prod-backup.sql` is gitignored — don't commit it, especially if your content includes user-submitted data.
+
 ---
 
 ## Public API Reference
@@ -358,6 +377,9 @@ GET    /api/preview/:token
 | `boolean` | `boolean` | |
 | `relation` | entry object or array | Resolved inline; only published related entries are included |
 | `select` | `string` | One value from a defined set of options |
+| `email` | `string` | Email address |
+| `phone` | `string` | Phone number; a sibling `{slug}_digits` key with only numeric characters is also included |
+| `color` | `string` | Hex color value (e.g. `#ff5733`) |
 
 ---
 

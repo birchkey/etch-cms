@@ -130,6 +130,9 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
       } else {
         fieldValues[f.slug] = parsed;
       }
+    } else if (f.type === 'phone' && rawValue) {
+      fieldValues[f.slug] = rawValue;
+      fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
     } else {
       fieldValues[f.slug] = parseFieldValue(rawValue, f.type);
     }
@@ -255,6 +258,9 @@ async function hydrateRelatedEntry(
         () => `src="${baseUrl}${signedPaths[ri++]}"`
       );
       fieldValues[f.slug] = addHeadingIds(withImages);
+    } else if (f.type === 'phone' && rawValue) {
+      fieldValues[f.slug] = rawValue;
+      fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
     } else {
       fieldValues[f.slug] = parseFieldValue(rawValue, f.type);
     }

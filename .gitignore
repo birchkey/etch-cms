@@ -17,3 +17,7 @@ dist/
 # OS
 .DS_Store
 .claude
+
+# Local DB exports
+*.sql.backup
+prod-backup.sql
