@@ -1,13 +1,16 @@
--- SQLite does not support ALTER TABLE ... ALTER COLUMN CHECK constraints,
--- so we recreate the fields table with the updated constraint.
+-- Recreate fields table to add 'email' and 'phone' to the type CHECK constraint.
 --
--- We use fields_new (not fields_old) to avoid the issue where SQLite >= 3.26
--- rewrites FK references in entry_fields/entry_fields_draft when renaming
--- the original table. By creating a new table and renaming it into place,
--- the original 'fields' table (which other tables reference) is dropped last
--- after the new one has already taken its name.
-
-PRAGMA foreign_keys = OFF;
+-- Uses the safe D1 pattern (no PRAGMA required):
+--   1. Create fields_new with updated schema
+--   2. Copy field definitions
+--   3. Back up entry_fields / entry_fields_draft (child tables — safe to drop)
+--   4. Drop child tables so fields has no dependents
+--   5. Drop fields (now safe — nothing references it)
+--   6. Rename fields_new → fields
+--   7. Recreate entry_fields / entry_fields_draft with correct FKs
+--   8. Restore data and drop backups
+--
+-- See MIGRATIONS.md for why PRAGMA foreign_keys / legacy_alter_table cannot be used.
 
 CREATE TABLE fields_new (
   id TEXT PRIMARY KEY,
@@ -31,10 +34,38 @@ CREATE TABLE fields_new (
   UNIQUE(content_type_id, slug)
 );
 
-INSERT INTO fields_new SELECT * FROM fields;
+INSERT INTO fields_new (id, content_type_id, name, slug, type, required, sort_order, relation_content_type_id, relation_cardinality, multiple, rich_text_extensions, select_options, min_length, max_length, min_value, max_value, pattern, created_at)
+SELECT                  id, content_type_id, name, slug, type, required, sort_order, relation_content_type_id, relation_cardinality, multiple, rich_text_extensions, select_options, min_length, max_length, min_value, max_value, pattern, created_at
+FROM fields;
 
+CREATE TABLE entry_fields_backup (entry_id TEXT, field_id TEXT, value TEXT);
+INSERT INTO entry_fields_backup SELECT entry_id, field_id, value FROM entry_fields;
+
+CREATE TABLE entry_fields_draft_backup (entry_id TEXT, field_id TEXT, value TEXT);
+INSERT INTO entry_fields_draft_backup SELECT entry_id, field_id, value FROM entry_fields_draft;
+
+DROP TABLE entry_fields;
+DROP TABLE entry_fields_draft;
 DROP TABLE fields;
-
 ALTER TABLE fields_new RENAME TO fields;
 
-PRAGMA foreign_keys = ON;
+CREATE TABLE entry_fields (
+  entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  field_id TEXT NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+  value TEXT,
+  PRIMARY KEY (entry_id, field_id)
+);
+CREATE INDEX idx_entry_fields_field ON entry_fields(field_id);
+
+CREATE TABLE entry_fields_draft (
+  entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  field_id TEXT NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+  value TEXT,
+  PRIMARY KEY (entry_id, field_id)
+);
+
+INSERT INTO entry_fields SELECT * FROM entry_fields_backup;
+INSERT INTO entry_fields_draft SELECT * FROM entry_fields_draft_backup;
+
+DROP TABLE entry_fields_backup;
+DROP TABLE entry_fields_draft_backup;
