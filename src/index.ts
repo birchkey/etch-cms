@@ -73,7 +73,15 @@ app.get('/r2/:key{.+}', async (c) => {
     // Admin UI access via session cookie
     const token = getCookie(c, 'etch_access');
     const payload = token ? await verifyJWT(token, c.env.JWT_SECRET) : null;
-    if (!payload) return c.json({ error: 'Unauthorized' }, 401);
+    if (!payload) {
+      // Allow unauthenticated access to assets used as branding — the login page
+      // needs to load the logo and favicon before the user has authenticated.
+      const branding = await c.env.DB.prepare(
+        "SELECT value FROM settings WHERE key IN ('logo_image_url', 'favicon_url')"
+      ).all<{ value: string }>();
+      const isBranding = branding.results.some(row => row.value === `/r2/${key}`);
+      if (!isBranding) return c.json({ error: 'Unauthorized' }, 401);
+    }
   }
 
   const object = await c.env.ASSETS_BUCKET.get(`assets/${key}`);

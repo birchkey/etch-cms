@@ -455,14 +455,13 @@ function RelationFieldEditor({
 }) {
   const [options, setOptions] = useState<{ id: string; label: string; status: string }[]>([]);
   const [ctName, setCtName] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!!field.relation_content_type_id);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!field.relation_content_type_id) return;
-    setLoading(true);
     Promise.all([
       contentTypesApi.get(field.relation_content_type_id),
       contentTypesApi.selectEntries(field.relation_content_type_id),

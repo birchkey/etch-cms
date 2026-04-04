@@ -10,6 +10,8 @@ const BASE = '/api';
 
 // Mutex to prevent multiple concurrent refresh attempts
 let refreshPromise: Promise<boolean> | null = null;
+// Once a refresh fails, suppress further attempts and redirects within this page load
+let sessionInvalid = false;
 
 async function doRefresh(): Promise<boolean> {
   try {
@@ -24,6 +26,7 @@ async function doRefresh(): Promise<boolean> {
 }
 
 function attemptRefresh(): Promise<boolean> {
+  if (sessionInvalid) return Promise.resolve(false);
   if (!refreshPromise) {
     refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
   }
@@ -50,8 +53,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (refreshed) {
       res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' });
     } else {
-      clearUserInfo();
-      window.location.href = '/login';
+      if (!sessionInvalid) {
+        sessionInvalid = true;
+        clearUserInfo();
+        window.location.href = '/login';
+      }
       throw new Error('Session expired');
     }
   }

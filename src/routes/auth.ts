@@ -144,7 +144,6 @@ auth.post('/refresh', async (c) => {
   }>();
 
   if (!row) {
-    await c.env.DB.prepare('INSERT INTO login_attempts (ip, attempted_at) VALUES (?, ?)').bind(ip, nowMs).run();
     return c.json({ error: 'Invalid or expired refresh token' }, 401);
   }
 

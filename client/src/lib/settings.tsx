@@ -74,7 +74,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     apply({ ...DEFAULTS, ...data });
   }, [apply]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(res => res.ok ? res.json() as Promise<Partial<SiteSettings>> : Promise.reject())
+      .then(data => apply({ ...DEFAULTS, ...data }))
+      .catch(() => {});
+  }, [apply]);
 
   return (
     <SettingsContext.Provider value={{ settings, refresh, update }}>

@@ -59,7 +59,6 @@ export default function AuditLogPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
     auditLogApi.list({ page, limit: PAGE_SIZE, resource_type: resourceType || undefined })
       .then(res => {
         setLogs(res.data);
@@ -81,7 +80,7 @@ export default function AuditLogPage() {
         {FILTER_TABS.map(([val, label]) => (
           <button
             key={val}
-            onClick={() => { setResourceType(val); setPage(1); }}
+            onClick={() => { setLoading(true); setResourceType(val); setPage(1); }}
             className={`px-3 py-1.5 transition-colors ${resourceType === val ? 'bg-zinc-900 text-white' : 'text-zinc-600 hover:bg-zinc-50'}`}
           >
             {label}
@@ -149,12 +148,12 @@ export default function AuditLogPage() {
 
       {meta && meta.pages > 1 && (
         <div className="flex items-center justify-center gap-4 mt-6">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setLoading(true); setPage(p => p - 1); }}>
             <ChevronLeft className="h-4 w-4 mr-1" />
             Previous
           </Button>
           <span className="text-sm text-zinc-500">Page {page} of {meta.pages}</span>
-          <Button variant="outline" size="sm" disabled={!meta.has_next} onClick={() => setPage(p => p + 1)}>
+          <Button variant="outline" size="sm" disabled={!meta.has_next} onClick={() => { setLoading(true); setPage(p => p + 1); }}>
             Next
             <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
