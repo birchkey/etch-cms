@@ -31,6 +31,7 @@ function makeField(overrides: Partial<Field>): Field {
     min_value: null,
     max_value: null,
     pattern: null,
+    phone_format: null,
     created_at: 0,
     ...overrides,
   };
