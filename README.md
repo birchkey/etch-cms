@@ -194,27 +194,35 @@ npm install
 cd client && npm install && cd ..
 ```
 
-### 2. Create Cloudflare resources
+### 2. Configure Wrangler
+
+```bash
+cp wrangler.example.toml wrangler.toml
+```
+
+Open `wrangler.toml` and replace the placeholder values — `your-worker-name`, `your-d1-database-name`, `your-r2-bucket-name`, and `your-d1-database-id` — with your own names. Choose your database and bucket names now (you'll create the actual resources in the next step), then come back to fill in the `database_id` once Cloudflare generates it.
+
+### 3. Create Cloudflare resources
 
 ```bash
 # Create the D1 database
-wrangler d1 create etch-cms-db
+wrangler d1 create your-d1-database-name
 
 # Create the R2 bucket
-wrangler r2 bucket create etch-cms-assets
+wrangler r2 bucket create your-r2-bucket-name
 ```
 
-Copy the `database_id` from the D1 output and update `wrangler.toml`.
+Copy the `database_id` from the D1 output and update the `database_id` field in `wrangler.toml`. Set `database_name` and `bucket_name` to match the names you chose above.
 
-### 3. Run database migrations
+### 4. Run database migrations
 
 ```bash
-wrangler d1 migrations apply etch-cms-db --remote
+wrangler d1 migrations apply your-d1-database-name --remote
 ```
 
 > Always pass `--remote` when targeting your deployed D1 instance. Without it, Wrangler applies changes to a local SQLite file only.
 
-### 4. Configure secrets
+### 5. Configure secrets
 
 **For local development**, copy the example env file, then use the included script to generate and write the password hash directly to `.dev.vars`:
 
@@ -240,7 +248,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 wrangler secret put JWT_SECRET
 ```
 
-### 5. Build the client and deploy
+### 6. Build the client and deploy
 
 ```bash
 cd client && npm run build && cd ..
@@ -267,11 +275,11 @@ To develop against real content, you can export the production D1 database and i
 
 ```bash
 # Export production DB to a local SQL file
-npx wrangler d1 export etch-cms-db --remote --output=./prod-backup.sql
+npx wrangler d1 export your-d1-database-name --remote --output=./prod-backup.sql
 
 # Wipe the local DB and replace it with the production export
 rm -rf .wrangler/state/v3/d1
-npx wrangler d1 execute etch-cms-db --local --file=./prod-backup.sql
+npx wrangler d1 execute your-d1-database-name --local --file=./prod-backup.sql
 ```
 
 The export includes the full schema and data. You don't need to re-run migrations afterward.

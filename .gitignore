@@ -13,6 +13,7 @@ dist/
 
 # Wrangler
 .wrangler/
+wrangler.toml
 
 # OS
 .DS_Store
