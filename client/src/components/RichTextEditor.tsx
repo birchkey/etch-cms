@@ -65,7 +65,7 @@ function Toolbar({ editor, allowed }: { editor: Editor; allowed: Set<string> | n
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-0.5 p-2 border-b border-zinc-200 bg-zinc-50">
+      <div className="flex flex-wrap items-center gap-0.5 p-2 border-b border-zinc-200 bg-zinc-50 sticky top-[61px] z-10 rounded-t-md">
         {hasHeadings && (
           <>
             <ToolbarButton onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} title="H1">
@@ -205,7 +205,7 @@ export function RichTextEditor({ value, onChange, placeholder, allowedExtensions
   if (!editor) return null;
 
   return (
-    <div className="border border-zinc-200 rounded-md overflow-hidden">
+    <div className="border border-zinc-200 rounded-md">
       <Toolbar editor={editor} allowed={allowed} />
       <EditorContent editor={editor} className="tiptap-wrapper" />
     </div>

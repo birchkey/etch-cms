@@ -4,9 +4,11 @@ import { contentTypesApi, entriesApi, ContentType, Entry, Field, ApiError } from
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { StatusBadge } from '@/components/StatusBadge';
 import { FieldValueEditor } from '@/components/FieldValueEditor';
-import { ChevronLeft, Loader2, Globe, EyeOff, Save, AlertCircle, Copy, Link2, Clock, X } from 'lucide-react';
+import { ChevronLeft, Loader2, Globe, EyeOff, Save, AlertCircle, Copy, Link2, Clock, X, MoreHorizontal, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { slugify } from '@/lib/utils';
 import { usePageTitle } from '@/lib/settings';
@@ -27,6 +29,8 @@ export default function EntryForm() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [copyingPreview, setCopyingPreview] = useState(false);
   const [showScheduler, setShowScheduler] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
@@ -283,6 +287,19 @@ export default function EntryForm() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!entry) return;
+    setDeleting(true);
+    try {
+      await entriesApi.delete(entry.id);
+      toast.success('Entry deleted');
+      navigate(`/content-types/${typeId}/entries`, { replace: true });
+    } catch {
+      toast.error('Failed to delete entry');
+      setDeleting(false);
+    }
+  };
+
   handleSaveRef.current = handleSave;
   handlePublishRef.current = handlePublish;
 
@@ -334,12 +351,6 @@ export default function EntryForm() {
                 {new Date(entry.scheduled_at).toLocaleString()}
               </span>
             )}
-            {hasUnpublishedChanges && (
-              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
-                <AlertCircle className="h-3 w-3" />
-                Unpublished changes
-              </span>
-            )}
             {autoSaveStatus === 'saving' && (
               <span className="text-xs text-zinc-400 flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" /> Saving...
@@ -358,31 +369,21 @@ export default function EntryForm() {
         <div className="flex items-center gap-2">
           {!isNew && entry && (
             <>
-              {isPublished && (
-                <>
-                  {hasUnpublishedChanges && (
-                    <Button size="sm" onClick={handlePublish} disabled={publishing}>
-                      {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Globe className="h-4 w-4 mr-2" />}
-                      Publish Changes
-                    </Button>
-                  )}
-                  <Button variant="outline" size="sm" onClick={handleUnpublish} disabled={publishing}>
-                    {publishing && !hasUnpublishedChanges ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <EyeOff className="h-4 w-4 mr-2" />}
-                    Unpublish
-                  </Button>
-                </>
+              <Button variant="outline" size="sm" onClick={handleCopyPreviewLink} disabled={copyingPreview}>
+                {copyingPreview ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Link2 className="h-4 w-4 mr-2" />}
+                Preview Link
+              </Button>
+              {isPublished && hasUnpublishedChanges && (
+                <Button size="sm" onClick={handlePublish} disabled={publishing}>
+                  {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Globe className="h-4 w-4 mr-2" />}
+                  Publish Changes
+                </Button>
               )}
               {isScheduled && (
-                <>
-                  <Button variant="outline" size="sm" onClick={handleUnschedule} disabled={publishing}>
-                    {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <X className="h-4 w-4 mr-2" />}
-                    Unschedule
-                  </Button>
-                  <Button size="sm" onClick={handlePublish} disabled={publishing}>
-                    {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Globe className="h-4 w-4 mr-2" />}
-                    Publish Now
-                  </Button>
-                </>
+                <Button size="sm" onClick={handlePublish} disabled={publishing}>
+                  {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Globe className="h-4 w-4 mr-2" />}
+                  Publish Now
+                </Button>
               )}
               {!isPublished && !isScheduled && (
                 <>
@@ -417,17 +418,6 @@ export default function EntryForm() {
               )}
             </>
           )}
-          {!isNew && entry && (
-            <Button variant="outline" size="sm" onClick={handleDuplicate} disabled={duplicating} title="Duplicate as draft">
-              {duplicating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
-              Duplicate
-            </Button>
-          )}
-          {!isNew && entry && (
-            <Button variant="ghost" size="icon" onClick={handleCopyPreviewLink} disabled={copyingPreview} title="Copy preview link">
-              {copyingPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-            </Button>
-          )}
           <Button variant={isNew ? 'default' : 'outline'} size="sm" onClick={handleSave} disabled={saving}>
             {saving
               ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -435,6 +425,38 @@ export default function EntryForm() {
             }
             {isNew ? 'Create' : 'Save'}
           </Button>
+          {!isNew && entry && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {isPublished && (
+                  <DropdownMenuItem onClick={handleUnpublish} disabled={publishing}>
+                    <EyeOff className="h-4 w-4 mr-2" />
+                    Unpublish
+                  </DropdownMenuItem>
+                )}
+                {isScheduled && (
+                  <DropdownMenuItem onClick={handleUnschedule} disabled={publishing}>
+                    <X className="h-4 w-4 mr-2" />
+                    Unschedule
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={handleDuplicate} disabled={duplicating}>
+                  <Copy className="h-4 w-4 mr-2" />
+                  Duplicate
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)} className="text-red-600 focus:text-red-600">
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -527,6 +549,26 @@ export default function EntryForm() {
           </div>
         )}
       </div>
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete entry?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete this entry and cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
