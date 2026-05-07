@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { contentTypesApi, ContentType, FieldInput } from '@/lib/api';
+import { contentTypesApi, ContentType, FieldInput, RepeaterSubfield } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,10 +28,24 @@ import { Link } from 'react-router-dom';
 import { usePageTitle } from '@/lib/settings';
 import { slugify, slugifyUnderscore } from '@/lib/utils';
 
+type RepeaterSubfieldDraft = {
+  _key: string;
+  id: string;
+  name: string;
+  slug: string;
+  type: string;
+  required: boolean;
+  multiple: boolean;
+  select_options_draft: string[];
+  rich_text_extensions_draft: string[] | null;
+  phone_format: 'us' | 'international' | null;
+};
+
 type FieldDraft = FieldInput & {
   _key: string;
   rich_text_extensions_draft: string[] | null; // null = all enabled
   select_options_draft: string[]; // list of option strings
+  repeater_subfields_draft: RepeaterSubfieldDraft[];
 };
 
 const ALL_RICH_TEXT_EXTENSIONS = [
@@ -60,6 +74,21 @@ const FIELD_TYPES = [
   { value: 'datetime', label: 'Date & Time' },
   { value: 'boolean', label: 'Checkbox' },
   { value: 'relation', label: 'Link to' },
+  { value: 'select', label: 'Select' },
+  { value: 'repeater', label: 'Repeater' },
+];
+
+// Sub-field types — excludes relation and repeater to prevent nesting
+const SUBFIELD_TYPES = [
+  { value: 'text', label: 'Text' },
+  { value: 'rich_text', label: 'Rich Text' },
+  { value: 'email', label: 'Email' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'color', label: 'Color' },
+  { value: 'image', label: 'Image' },
+  { value: 'number', label: 'Number' },
+  { value: 'datetime', label: 'Date & Time' },
+  { value: 'boolean', label: 'Checkbox' },
   { value: 'select', label: 'Select' },
 ];
 
@@ -104,6 +133,24 @@ export default function ContentTypeForm() {
             select_options_draft: f.select_options
               ? JSON.parse(f.select_options) as string[]
               : [],
+            repeater_subfields_draft: f.repeater_subfields
+              ? (JSON.parse(f.repeater_subfields) as RepeaterSubfield[]).map((sf, j) => ({
+                  _key: `sf_${i}_${j}`,
+                  id: sf.id,
+                  name: sf.name,
+                  slug: sf.slug,
+                  type: sf.type,
+                  required: sf.required,
+                  multiple: sf.multiple,
+                  select_options_draft: sf.select_options
+                    ? JSON.parse(sf.select_options) as string[]
+                    : [],
+                  rich_text_extensions_draft: sf.rich_text_extensions
+                    ? JSON.parse(sf.rich_text_extensions) as string[]
+                    : null,
+                  phone_format: sf.phone_format ?? null,
+                }))
+              : [],
             _key: `field_${i}`,
           })));
         })
@@ -125,6 +172,7 @@ export default function ContentTypeForm() {
         relation_cardinality: 'one',
         rich_text_extensions_draft: null,
         select_options_draft: [],
+        repeater_subfields_draft: [],
         min_length: null,
         max_length: null,
         min_value: null,
@@ -176,6 +224,23 @@ export default function ContentTypeForm() {
         : null,
       select_options: f.select_options_draft.length
         ? JSON.stringify(f.select_options_draft)
+        : null,
+      repeater_subfields: f.type === 'repeater' && f.repeater_subfields_draft.length > 0
+        ? JSON.stringify(f.repeater_subfields_draft.map(sf => ({
+            id: sf.id || crypto.randomUUID(),
+            name: sf.name,
+            slug: sf.slug || slugifyUnderscore(sf.name),
+            type: sf.type,
+            required: sf.required,
+            multiple: sf.multiple,
+            select_options: sf.select_options_draft.length
+              ? JSON.stringify(sf.select_options_draft)
+              : null,
+            rich_text_extensions: sf.rich_text_extensions_draft !== null
+              ? JSON.stringify(sf.rich_text_extensions_draft)
+              : null,
+            phone_format: sf.phone_format ?? null,
+          })))
         : null,
       min_length: f.min_length ?? null,
       max_length: f.max_length ?? null,
@@ -256,13 +321,7 @@ export default function ContentTypeForm() {
 
         {/* Fields */}
         <div className="bg-white rounded-xl border border-zinc-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-zinc-800">Fields</h2>
-            <Button type="button" variant="outline" size="sm" onClick={addField}>
-              <Plus className="h-4 w-4 mr-1" />
-              Add Field
-            </Button>
-          </div>
+          <h2 className="font-semibold text-zinc-800 mb-4">Fields</h2>
 
           {fields.length === 0 ? (
             <div className="text-center py-8 text-zinc-400 text-sm border-2 border-dashed border-zinc-100 rounded-lg">
@@ -279,6 +338,11 @@ export default function ContentTypeForm() {
               </SortableContext>
             </DndContext>
           )}
+
+          <Button type="button" variant="outline" size="sm" onClick={addField} className="mt-4">
+            <Plus className="h-4 w-4 mr-1" />
+            Add Field
+          </Button>
         </div>
 
         <div className="flex justify-end gap-3">
@@ -583,6 +647,62 @@ function SortableFieldRow({
         </div>
       )}
 
+      {/* Repeater sub-fields */}
+      {field.type === 'repeater' && (
+        <div className="ml-6 space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Sub-fields</Label>
+            <button
+              type="button"
+              onClick={() => {
+                const newSf: RepeaterSubfieldDraft = {
+                  _key: `sf_${Date.now()}`,
+                  id: crypto.randomUUID(),
+                  name: '',
+                  slug: '',
+                  type: 'text',
+                  required: false,
+                  multiple: false,
+                  select_options_draft: [],
+                  rich_text_extensions_draft: null,
+                  phone_format: null,
+                };
+                updateField(field._key, {
+                  repeater_subfields_draft: [...field.repeater_subfields_draft, newSf],
+                });
+              }}
+              className="text-xs text-indigo-600 hover:text-indigo-800"
+            >
+              + Add sub-field
+            </button>
+          </div>
+          {field.repeater_subfields_draft.length === 0 ? (
+            <p className="text-xs text-zinc-400">No sub-fields yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {field.repeater_subfields_draft.map(sf => (
+                <SubfieldRow
+                  key={sf._key}
+                  sf={sf}
+                  onUpdate={updates => {
+                    updateField(field._key, {
+                      repeater_subfields_draft: field.repeater_subfields_draft.map(s =>
+                        s._key === sf._key ? { ...s, ...updates } : s
+                      ),
+                    });
+                  }}
+                  onRemove={() => {
+                    updateField(field._key, {
+                      repeater_subfields_draft: field.repeater_subfields_draft.filter(s => s._key !== sf._key),
+                    });
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* API key */}
       <div className="ml-6 space-y-1">
         <Label className="text-xs">API key</Label>
@@ -593,6 +713,180 @@ function SortableFieldRow({
           className="h-7 text-xs font-mono w-36"
         />
         <p className="text-xs text-zinc-400">Used as the key in the API response.</p>
+      </div>
+    </div>
+  );
+}
+
+function SubfieldRow({
+  sf,
+  onUpdate,
+  onRemove,
+}: {
+  sf: RepeaterSubfieldDraft;
+  onUpdate: (updates: Partial<RepeaterSubfieldDraft>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="border border-zinc-200 rounded-md p-3 space-y-2 bg-white">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Name</Label>
+            <Input
+              value={sf.name}
+              onChange={e => onUpdate({ name: e.target.value })}
+              placeholder="Label"
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Type</Label>
+            <Select value={sf.type} onValueChange={v => onUpdate({ type: v })}>
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SUBFIELD_TYPES.map(t => (
+                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="mt-5 p-1 text-zinc-400 hover:text-red-500 transition-colors"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5">
+          <Switch checked={sf.required} onCheckedChange={v => onUpdate({ required: v })} />
+          <Label className="text-xs">Required</Label>
+        </div>
+        {(sf.type === 'image' || sf.type === 'select') && (
+          <div className="flex items-center gap-1.5">
+            <Switch checked={sf.multiple} onCheckedChange={v => onUpdate({ multiple: v })} />
+            <Label className="text-xs">{sf.type === 'image' ? 'Multiple images' : 'Allow multiple'}</Label>
+          </div>
+        )}
+      </div>
+
+      {/* Select options for sub-field */}
+      {sf.type === 'select' && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Options</Label>
+            <button
+              type="button"
+              onClick={() => onUpdate({ select_options_draft: [...sf.select_options_draft, ''] })}
+              className="text-xs text-indigo-600 hover:text-indigo-800"
+            >
+              + Add option
+            </button>
+          </div>
+          {sf.select_options_draft.length === 0 ? (
+            <p className="text-xs text-zinc-400">No options yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {sf.select_options_draft.map((opt, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <Input
+                    value={opt}
+                    onChange={e => {
+                      const next = [...sf.select_options_draft];
+                      next[i] = e.target.value;
+                      onUpdate({ select_options_draft: next });
+                    }}
+                    placeholder="Option"
+                    className="h-6 text-xs flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onUpdate({ select_options_draft: sf.select_options_draft.filter((_, j) => j !== i) })}
+                    className="text-zinc-400 hover:text-red-500"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Phone format for sub-field */}
+      {sf.type === 'phone' && (
+        <div className="space-y-1">
+          <Label className="text-xs">Format</Label>
+          <Select
+            value={sf.phone_format ?? 'us'}
+            onValueChange={v => onUpdate({ phone_format: v as 'us' | 'international' })}
+          >
+            <SelectTrigger className="h-7 text-xs w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="us">US — (555) 123-4567</SelectItem>
+              <SelectItem value="international">International — +1 555 123 4567</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* Rich text extensions for sub-field */}
+      {sf.type === 'rich_text' && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Switch
+              checked={sf.rich_text_extensions_draft !== null}
+              onCheckedChange={v => onUpdate({
+                rich_text_extensions_draft: v ? ALL_RICH_TEXT_EXTENSIONS.map(e => e.key) : null,
+              })}
+            />
+            <Label className="text-xs">Restrict formatting options</Label>
+          </div>
+          {sf.rich_text_extensions_draft !== null && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
+              {ALL_RICH_TEXT_EXTENSIONS.map(ext => {
+                const checked = sf.rich_text_extensions_draft?.includes(ext.key) ?? false;
+                return (
+                  <label key={ext.key} className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={e => {
+                        const current = sf.rich_text_extensions_draft ?? [];
+                        onUpdate({
+                          rich_text_extensions_draft: e.target.checked
+                            ? [...current, ext.key]
+                            : current.filter(k => k !== ext.key),
+                        });
+                      }}
+                      className="rounded border-zinc-300"
+                    />
+                    <span className="text-xs text-zinc-600">{ext.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* API key */}
+      <div className="space-y-0.5">
+        <Label className="text-xs">API key</Label>
+        <Input
+          value={sf.slug ?? slugifyUnderscore(sf.name)}
+          onChange={e => onUpdate({ slug: e.target.value })}
+          placeholder={slugifyUnderscore(sf.name) || 'field_key'}
+          className="h-6 text-xs font-mono w-32"
+        />
       </div>
     </div>
   );

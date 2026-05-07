@@ -127,13 +127,26 @@ export const usersApi = {
     }),
 };
 
+// Sub-field definition for repeater fields
+export interface RepeaterSubfield {
+  id: string;
+  name: string;
+  slug: string;
+  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'select' | 'email' | 'phone' | 'color';
+  required: boolean;
+  multiple: boolean; // for image and select
+  select_options: string | null; // JSON array string
+  rich_text_extensions: string | null; // JSON array string
+  phone_format: 'us' | 'international' | null;
+}
+
 // Content types
 export interface Field {
   id: string;
   content_type_id: string;
   name: string;
   slug: string;
-  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color';
+  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color' | 'repeater';
   required: number;
   sort_order: number;
   relation_content_type_id: string | null;
@@ -147,6 +160,7 @@ export interface Field {
   max_value: number | null;
   pattern: string | null;
   phone_format: 'us' | 'international' | null;
+  repeater_subfields: string | null; // JSON array of RepeaterSubfield definitions
   created_at: number;
 }
 
@@ -179,6 +193,7 @@ export interface FieldInput {
   max_value?: number | null;
   pattern?: string | null;
   phone_format?: 'us' | 'international' | null;
+  repeater_subfields?: string | null;
 }
 
 export const contentTypesApi = {

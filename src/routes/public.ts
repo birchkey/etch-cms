@@ -18,26 +18,52 @@ async function getAltText(db: D1Database, storedPath: string): Promise<string | 
   return row?.alt_text ?? null;
 }
 
-// Batch-fetch alt texts for all image paths found in the given ef rows.
-// Returns a map of stored path ("/r2/...") → alt_text, replacing N individual queries with one.
-async function fetchAltTextMap(
-  db: D1Database,
+// Collect all image paths from ef rows, including paths inside repeater field values.
+// Returns a set of stored paths like "/r2/abc.jpg".
+function extractImagePaths(
   efRows: { field_id: string; value: string | null }[],
-  imageFieldIds: Set<string>
-): Promise<Map<string, string | null>> {
+  imageFieldIds: Set<string>,
+  repeaterFields: Map<string, { repeater_subfields: string | null }>
+): Set<string> {
   const paths = new Set<string>();
   for (const ef of efRows) {
-    if (!imageFieldIds.has(ef.field_id) || !ef.value) continue;
-    try {
-      const parsed = JSON.parse(ef.value);
-      if (Array.isArray(parsed)) {
-        for (const p of parsed) if (typeof p === 'string') paths.add(p);
-        continue;
-      }
-    } catch { /* not JSON — treat as single path */ }
-    paths.add(ef.value);
+    if (imageFieldIds.has(ef.field_id) && ef.value) {
+      try {
+        const parsed = JSON.parse(ef.value);
+        if (Array.isArray(parsed)) {
+          for (const p of parsed) if (typeof p === 'string') paths.add(p);
+          continue;
+        }
+      } catch { /* not JSON — single path */ }
+      paths.add(ef.value);
+    }
+    const rf = repeaterFields.get(ef.field_id);
+    if (rf?.repeater_subfields && ef.value) {
+      try {
+        const subfields = JSON.parse(rf.repeater_subfields) as Array<{ type: string; slug: string; multiple: boolean }>;
+        const imageSubs = subfields.filter(sf => sf.type === 'image');
+        if (imageSubs.length > 0) {
+          const items = JSON.parse(ef.value) as Array<Record<string, unknown>>;
+          for (const item of items) {
+            for (const sf of imageSubs) {
+              const v = item[sf.slug];
+              if (typeof v === 'string') paths.add(v);
+              else if (Array.isArray(v)) for (const p of v) if (typeof p === 'string') paths.add(p);
+            }
+          }
+        }
+      } catch { /* skip */ }
+    }
   }
+  return paths;
+}
 
+// Batch-fetch alt texts for a set of image paths.
+// Returns a map of stored path ("/r2/...") → alt_text.
+async function fetchAltTextMap(
+  db: D1Database,
+  paths: Set<string>
+): Promise<Map<string, string | null>> {
   if (paths.size === 0) return new Map();
 
   const r2Keys = [...paths].map(p => `assets/${p.replace(/^\/r2\//, '')}`);
@@ -133,6 +159,48 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
     } else if (f.type === 'phone' && rawValue) {
       fieldValues[f.slug] = rawValue;
       fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
+    } else if (f.type === 'repeater' && rawValue) {
+      try {
+        const subfields = f.repeater_subfields
+          ? JSON.parse(f.repeater_subfields) as Array<{ id: string; name: string; slug: string; type: string; multiple: boolean }>
+          : [];
+        const items = JSON.parse(rawValue) as Array<Record<string, unknown>>;
+        fieldValues[f.slug] = await Promise.all(items.map(async item => {
+          const expanded: Record<string, unknown> = { _id: item._id };
+          for (const sf of subfields) {
+            const val = item[sf.slug] ?? null;
+            if (sf.type === 'image' && val) {
+              if (sf.multiple) {
+                const paths = val as string[];
+                expanded[sf.slug] = await Promise.all(paths.map(async (p: string) => {
+                  const signedPath = secret ? await signAssetUrl(p, secret) : p;
+                  return { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(p) ?? null) : null };
+                }));
+              } else {
+                const path = val as string;
+                const signedPath = secret ? await signAssetUrl(path, secret) : path;
+                expanded[sf.slug] = { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(path) ?? null) : null };
+              }
+            } else if (sf.type === 'rich_text' && typeof val === 'string') {
+              const r2Paths: string[] = [];
+              val.replace(/src="(\/r2\/[^"]+)"/g, (_, p: string) => { r2Paths.push(p); return ''; });
+              const signedPaths = secret
+                ? await Promise.all(r2Paths.map(p => signAssetUrl(p, secret)))
+                : r2Paths;
+              let ri = 0;
+              expanded[sf.slug] = addHeadingIds(val.replace(
+                /src="(\/r2\/[^"]+)"/g,
+                () => `src="${baseUrl}${signedPaths[ri++]}"`
+              ));
+            } else {
+              expanded[sf.slug] = val;
+            }
+          }
+          return expanded;
+        }));
+      } catch {
+        fieldValues[f.slug] = null;
+      }
     } else {
       fieldValues[f.slug] = parseFieldValue(rawValue, f.type);
     }
@@ -261,6 +329,48 @@ async function hydrateRelatedEntry(
     } else if (f.type === 'phone' && rawValue) {
       fieldValues[f.slug] = rawValue;
       fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
+    } else if (f.type === 'repeater' && rawValue) {
+      try {
+        const subfields = f.repeater_subfields
+          ? JSON.parse(f.repeater_subfields) as Array<{ id: string; name: string; slug: string; type: string; multiple: boolean }>
+          : [];
+        const items = JSON.parse(rawValue) as Array<Record<string, unknown>>;
+        fieldValues[f.slug] = await Promise.all(items.map(async item => {
+          const expanded: Record<string, unknown> = { _id: item._id };
+          for (const sf of subfields) {
+            const val = item[sf.slug] ?? null;
+            if (sf.type === 'image' && val) {
+              if (sf.multiple) {
+                const paths = val as string[];
+                expanded[sf.slug] = await Promise.all(paths.map(async (p: string) => {
+                  const signedPath = secret ? await signAssetUrl(p, secret) : p;
+                  return { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(p) ?? null) : null };
+                }));
+              } else {
+                const path = val as string;
+                const signedPath = secret ? await signAssetUrl(path, secret) : path;
+                expanded[sf.slug] = { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(path) ?? null) : null };
+              }
+            } else if (sf.type === 'rich_text' && typeof val === 'string') {
+              const r2Paths: string[] = [];
+              val.replace(/src="(\/r2\/[^"]+)"/g, (_, p: string) => { r2Paths.push(p); return ''; });
+              const signedPaths = secret
+                ? await Promise.all(r2Paths.map(p => signAssetUrl(p, secret)))
+                : r2Paths;
+              let ri = 0;
+              expanded[sf.slug] = addHeadingIds(val.replace(
+                /src="(\/r2\/[^"]+)"/g,
+                () => `src="${baseUrl}${signedPaths[ri++]}"`
+              ));
+            } else {
+              expanded[sf.slug] = val;
+            }
+          }
+          return expanded;
+        }));
+      } catch {
+        fieldValues[f.slug] = null;
+      }
     } else {
       fieldValues[f.slug] = parseFieldValue(rawValue, f.type);
     }
@@ -331,7 +441,12 @@ publicApi.get('/:typeSlug', async (c) => {
     ...fields.results.filter(f => f.type === 'image').map(f => f.id),
     ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'image').map(f => f.id),
   ]);
-  const altTextMap = await fetchAltTextMap(c.env.DB, [...allEfRows, ...relEfRows], allImageFieldIds);
+  const allRepeaterFields = new Map([
+    ...fields.results.filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+    ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+  ]);
+  const imagePaths = extractImagePaths([...allEfRows, ...relEfRows], allImageFieldIds, allRepeaterFields);
+  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
 
   const data = await Promise.all(
     entriesResult.results.map(e => expandEntry(c.env.DB, e, fields.results, baseUrl, true, efByEntry.get(e.id), altTextMap, relatedData, c.env.JWT_SECRET))
@@ -381,7 +496,12 @@ publicApi.get('/:typeSlug/random', async (c) => {
     ...fields.results.filter(f => f.type === 'image').map(f => f.id),
     ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'image').map(f => f.id),
   ]);
-  const altTextMap = await fetchAltTextMap(c.env.DB, [...efRows.results, ...relEfRows], allImageFieldIds);
+  const allRepeaterFields = new Map([
+    ...fields.results.filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+    ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+  ]);
+  const imagePaths = extractImagePaths([...efRows.results, ...relEfRows], allImageFieldIds, allRepeaterFields);
+  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
   const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, altTextMap, relatedData, c.env.JWT_SECRET);
   return c.json({ data });
 });
@@ -431,7 +551,12 @@ publicApi.get('/:typeSlug/:id', async (c) => {
       ...fields.results.filter(f => f.type === 'image').map(f => f.id),
       ...[...previewRelatedData.fieldsByType.values()].flat().filter(f => f.type === 'image').map(f => f.id),
     ]);
-    const previewAltTextMap = await fetchAltTextMap(c.env.DB, [...efRows.results, ...previewRelEfRows], previewImageFieldIds);
+    const previewRepeaterFields = new Map([
+      ...fields.results.filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+      ...[...previewRelatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+    ]);
+    const previewImagePaths = extractImagePaths([...efRows.results, ...previewRelEfRows], previewImageFieldIds, previewRepeaterFields);
+    const previewAltTextMap = await fetchAltTextMap(c.env.DB, previewImagePaths);
     const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, previewAltTextMap, previewRelatedData, c.env.JWT_SECRET);
     return c.json({ data });
   }
@@ -452,7 +577,12 @@ publicApi.get('/:typeSlug/:id', async (c) => {
     ...fields.results.filter(f => f.type === 'image').map(f => f.id),
     ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'image').map(f => f.id),
   ]);
-  const altTextMap = await fetchAltTextMap(c.env.DB, [...efRows.results, ...relEfRows], allImageFieldIds);
+  const allRepeaterFields = new Map([
+    ...fields.results.filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+    ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+  ]);
+  const imagePaths = extractImagePaths([...efRows.results, ...relEfRows], allImageFieldIds, allRepeaterFields);
+  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
   const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, altTextMap, relatedData, c.env.JWT_SECRET);
   return c.json({ data });
 });

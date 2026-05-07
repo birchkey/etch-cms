@@ -54,7 +54,8 @@ function serializeFieldValue(value: unknown, type: string): string | null {
   if (value === null || value === undefined) return null;
   if (type === 'boolean') return value ? 'true' : 'false';
   if (type === 'number') return String(value);
-  if (type === 'relation') return JSON.stringify(value);
+  if (type === 'relation' || type === 'repeater') return JSON.stringify(value);
+  if (Array.isArray(value)) return JSON.stringify(value); // multiple image, multiple select
   return String(value);
 }
 

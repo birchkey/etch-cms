@@ -1,6 +1,21 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
-import { Field, contentTypesApi, assetsApi } from '@/lib/api';
+import { Field, RepeaterSubfield, contentTypesApi, assetsApi } from '@/lib/api';
 import { Input } from './ui/input';
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
@@ -8,7 +23,7 @@ import { RichTextEditor } from './RichTextEditor';
 import { AssetPicker } from './AssetPicker';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File } from 'lucide-react';
+import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical } from 'lucide-react';
 
 function assetTypeFromUrl(url: string): 'image' | 'video' | 'pdf' | 'file' {
   const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
@@ -201,6 +216,15 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
     case 'relation':
       return (
         <RelationFieldEditor
+          field={field}
+          value={value}
+          onChange={onChange}
+        />
+      );
+
+    case 'repeater':
+      return (
+        <RepeaterFieldEditor
           field={field}
           value={value}
           onChange={onChange}
@@ -578,6 +602,142 @@ function RelationFieldEditor({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+type RepeaterItem = Record<string, unknown> & { _id: string };
+
+function RepeaterFieldEditor({ field, value, onChange }: FieldValueEditorProps) {
+  const subfields = useMemo<RepeaterSubfield[]>(() => {
+    if (!field.repeater_subfields) return [];
+    try { return JSON.parse(field.repeater_subfields) as RepeaterSubfield[]; } catch { return []; }
+  }, [field.repeater_subfields]);
+
+  const items = ((value as RepeaterItem[] | null) ?? []);
+
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = items.findIndex(i => i._id === active.id);
+      const newIndex = items.findIndex(i => i._id === over.id);
+      onChange(arrayMove([...items], oldIndex, newIndex));
+    }
+  };
+
+  const addItem = () => {
+    const newItem: RepeaterItem = { _id: crypto.randomUUID() };
+    for (const sf of subfields) newItem[sf.slug] = null;
+    onChange([...items, newItem]);
+  };
+
+  const removeItem = (id: string) => {
+    onChange(items.filter(item => item._id !== id));
+  };
+
+  const updateItem = (id: string, slug: string, val: unknown) => {
+    onChange(items.map(item => item._id === id ? { ...item, [slug]: val } : item));
+  };
+
+  if (subfields.length === 0) {
+    return <p className="text-sm text-zinc-400">No sub-fields defined. Edit this collection's schema to configure the repeater.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={items.map(i => i._id)} strategy={verticalListSortingStrategy}>
+          {items.map((item, index) => (
+            <RepeaterItemCard
+              key={item._id}
+              id={item._id}
+              index={index}
+              item={item}
+              subfields={subfields}
+              onUpdate={(slug, val) => updateItem(item._id, slug, val)}
+              onRemove={() => removeItem(item._id)}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+      <Button type="button" variant="outline" size="sm" onClick={addItem}>
+        <Plus className="h-4 w-4 mr-2" />
+        Add item
+      </Button>
+    </div>
+  );
+}
+
+function RepeaterItemCard({
+  id,
+  index,
+  item,
+  subfields,
+  onUpdate,
+  onRemove,
+}: {
+  id: string;
+  index: number;
+  item: RepeaterItem;
+  subfields: RepeaterSubfield[];
+  onUpdate: (slug: string, val: unknown) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+
+  return (
+    <div ref={setNodeRef} style={style} className="border border-zinc-200 rounded-lg bg-white">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-100 bg-zinc-50 rounded-t-lg">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing touch-none p-0.5 text-zinc-300 hover:text-zinc-500">
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <span className="flex-1 text-sm font-medium text-zinc-600">Item {index + 1}</span>
+        <button type="button" onClick={onRemove} className="p-1 text-zinc-400 hover:text-red-500 transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="p-4 space-y-4">
+        {subfields.map(sf => {
+          const fakeField: Field = {
+            id: sf.id,
+            content_type_id: '',
+            name: sf.name,
+            slug: sf.slug,
+            type: sf.type as Field['type'],
+            required: sf.required ? 1 : 0,
+            sort_order: 0,
+            relation_content_type_id: null,
+            relation_cardinality: null,
+            multiple: sf.multiple ? 1 : 0,
+            rich_text_extensions: sf.rich_text_extensions ?? null,
+            select_options: sf.select_options ?? null,
+            min_length: null,
+            max_length: null,
+            min_value: null,
+            max_value: null,
+            pattern: null,
+            phone_format: sf.phone_format ?? null,
+            repeater_subfields: null,
+            created_at: 0,
+          };
+          return (
+            <div key={sf.id} className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-700">
+                {sf.name}
+                {sf.required && <span className="text-red-500 ml-0.5">*</span>}
+              </label>
+              <FieldValueEditor
+                field={fakeField}
+                value={item[sf.slug] ?? null}
+                onChange={val => onUpdate(sf.slug, val)}
+              />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

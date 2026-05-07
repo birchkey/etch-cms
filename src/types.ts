@@ -38,10 +38,11 @@ export interface FieldRow {
   max_value: number | null;
   pattern: string | null;
   phone_format: 'us' | 'international' | null;
+  repeater_subfields: string | null; // JSON array of RepeaterSubfield definitions
   created_at: number;
 }
 
-export type FieldType = 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color';
+export type FieldType = 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color' | 'repeater';
 
 export interface EntryRow {
   id: string;

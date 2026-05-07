@@ -6,7 +6,7 @@ export function parseFieldValue(value: string | null, type: string): unknown {
   if (value === null) return null;
   if (type === 'number') return Number(value);
   if (type === 'boolean') return value === 'true';
-  if (type === 'relation' || type === 'select') {
+  if (type === 'relation' || type === 'select' || type === 'image' || type === 'repeater') {
     try { return JSON.parse(value); } catch { return value; }
   }
   return value;
