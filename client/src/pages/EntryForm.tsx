@@ -8,10 +8,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { StatusBadge } from '@/components/StatusBadge';
 import { FieldValueEditor } from '@/components/FieldValueEditor';
-import { ChevronLeft, Loader2, Globe, EyeOff, Save, AlertCircle, Copy, Link2, Clock, X, MoreHorizontal, Trash2 } from 'lucide-react';
+import { ChevronLeft, Loader2, Globe, EyeOff, Save, AlertCircle, Copy, Link2, Clock, X, MoreHorizontal, Trash2, Eye, Lock, KeyRound, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { slugify } from '@/lib/utils';
 import { usePageTitle } from '@/lib/settings';
+import { cn } from '@/lib/utils';
+import { settingsApi } from '@/lib/api';
 
 export default function EntryForm() {
   const { typeId, entryId } = useParams<{ typeId: string; entryId: string }>();
@@ -41,11 +43,25 @@ export default function EntryForm() {
   const handleSaveRef = useRef<() => void>(() => {});
   const handlePublishRef = useRef<() => void>(() => {});
 
+  // Content protection
+  const [protectionType, setProtectionType] = useState<'none' | 'password' | 'jwt'>('none');
+  const [protectionPassword, setProtectionPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [jwtProviderName, setJwtProviderName] = useState<string | null>(null);
+  const protectionTypeRef = useRef<'none' | 'password' | 'jwt'>('none');
+  const protectionPasswordRef = useRef('');
+
   useEffect(() => {
     if (!typeId) return;
     const loadData = async () => {
-      const ct = await contentTypesApi.get(typeId);
+      const [ct, adminSettings] = await Promise.all([
+        contentTypesApi.get(typeId),
+        settingsApi.getAdmin().catch(() => null),
+      ]);
       setContentType(ct);
+
+      const providerLabels: Record<string, string> = { clerk: 'Clerk', auth0: 'Auth0', supabase: 'Supabase', firebase: 'Firebase Auth', custom: 'Auth Service' };
+      setJwtProviderName(adminSettings?.jwt_provider ? (providerLabels[adminSettings.jwt_provider] ?? null) : null);
 
       if (!isNew && entryId) {
         const e = await entriesApi.get(entryId);
@@ -56,6 +72,12 @@ export default function EntryForm() {
           slugRef.current = e.slug;
           setSlugManual(true);
         }
+        const pt = (e.protection_type ?? 'none') as 'none' | 'password' | 'jwt';
+        setProtectionType(pt);
+        protectionTypeRef.current = pt;
+        const pp = e.protection_password ?? '';
+        setProtectionPassword(pp);
+        protectionPasswordRef.current = pp;
       }
     };
     loadData()
@@ -64,6 +86,29 @@ export default function EntryForm() {
   }, [typeId, entryId, isNew]);
 
   useEffect(() => { slugRef.current = slug; }, [slug]);
+  useEffect(() => { protectionTypeRef.current = protectionType; }, [protectionType]);
+  useEffect(() => { protectionPasswordRef.current = protectionPassword; }, [protectionPassword]);
+
+  const scheduleAutoSave = useCallback((entryId: string, fields: Record<string, unknown>) => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setAutoSaveStatus('saving');
+    autoSaveTimer.current = setTimeout(async () => {
+      try {
+        const updated = await entriesApi.update(entryId, {
+          slug: slugRef.current || null,
+          fields,
+          protection_type: protectionTypeRef.current === 'none' ? null : protectionTypeRef.current,
+          protection_password: protectionTypeRef.current === 'password' ? protectionPasswordRef.current || null : null,
+        });
+        setEntry(updated);
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      } catch (err) {
+        setAutoSaveStatus('error');
+        toast.error('Auto-save failed', { description: err instanceof Error ? err.message : 'Unknown error' });
+      }
+    }, 1000);
+  }, []);
 
   const updateField = useCallback((fieldSlug: string, value: unknown) => {
     setFieldValues(prev => {
@@ -90,19 +135,7 @@ export default function EntryForm() {
       }
 
       if (!isNew && entry) {
-        if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-        setAutoSaveStatus('saving');
-        autoSaveTimer.current = setTimeout(async () => {
-          try {
-            const updated = await entriesApi.update(entry.id, { slug: slugRef.current || null, fields: next });
-            setEntry(updated); // picks up has_unpublished_changes from server
-            setAutoSaveStatus('saved');
-            setTimeout(() => setAutoSaveStatus('idle'), 2000);
-          } catch (err) {
-            setAutoSaveStatus('error');
-            toast.error('Auto-save failed', { description: err instanceof Error ? err.message : 'Unknown error' });
-          }
-        }, 1000);
+        scheduleAutoSave(entry.id, next);
       }
       return next;
     });
@@ -151,12 +184,14 @@ export default function EntryForm() {
     if (!typeId) return;
     setSaving(true);
     try {
+      const protection_type = protectionType === 'none' ? null : protectionType;
+      const protection_password = protectionType === 'password' ? protectionPassword || null : null;
       if (isNew) {
-        const created = await entriesApi.create({ content_type_id: typeId, slug: slug || null, fields: fieldValues });
+        const created = await entriesApi.create({ content_type_id: typeId, slug: slug || null, fields: fieldValues, protection_type, protection_password });
         toast.success('Created!');
         navigate(`/content-types/${typeId}/entries/${created.id}`, { replace: true });
       } else if (entry) {
-        const updated = await entriesApi.update(entry.id, { slug: slug || null, fields: fieldValues });
+        const updated = await entriesApi.update(entry.id, { slug: slug || null, fields: fieldValues, protection_type, protection_password });
         setEntry(updated);
         toast.success('Saved!');
       }
@@ -185,7 +220,12 @@ export default function EntryForm() {
         clearTimeout(autoSaveTimer.current);
         autoSaveTimer.current = null;
       }
-      await entriesApi.update(entry.id, { slug: slug || null, fields: fieldValues });
+      await entriesApi.update(entry.id, {
+        slug: slug || null,
+        fields: fieldValues,
+        protection_type: protectionType === 'none' ? null : protectionType,
+        protection_password: protectionType === 'password' ? protectionPassword || null : null,
+      });
       const result = await entriesApi.publish(entry.id);
       setEntry(result);
       setFieldErrors({});
@@ -260,7 +300,12 @@ export default function EntryForm() {
         clearTimeout(autoSaveTimer.current);
         autoSaveTimer.current = null;
       }
-      await entriesApi.update(entry.id, { slug: slug || null, fields: fieldValues });
+      await entriesApi.update(entry.id, {
+        slug: slug || null,
+        fields: fieldValues,
+        protection_type: protectionType === 'none' ? null : protectionType,
+        protection_password: protectionType === 'password' ? protectionPassword || null : null,
+      });
       const updated = await entriesApi.schedule(entry.id, new Date(scheduleDate).getTime());
       setEntry(updated);
       setShowScheduler(false);
@@ -501,6 +546,99 @@ export default function EntryForm() {
               <p className="text-xs text-zinc-400">
                 The URL-friendly identifier for this entry. Auto-generated from the title — leave blank to use a default.
               </p>
+            </div>
+
+            {/* Content Protection */}
+            <div className="bg-white rounded-xl border border-zinc-200 p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-sm font-medium text-zinc-800">Content Protection</Label>
+              </div>
+              <div className="flex gap-2">
+                {([
+                  { value: 'none', label: 'None', icon: <Globe className="h-3.5 w-3.5" /> },
+                  { value: 'password', label: 'Password', icon: <Lock className="h-3.5 w-3.5" /> },
+                  { value: 'jwt', label: 'Auth Service', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => {
+                      setProtectionType(opt.value);
+                      protectionTypeRef.current = opt.value;
+                      if (!isNew && entry) scheduleAutoSave(entry.id, fieldValues);
+                    }}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-lg border-2 px-3 py-1.5 text-xs font-medium transition-colors',
+                      protectionType === opt.value
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-zinc-200 text-zinc-500 hover:border-zinc-300'
+                    )}
+                  >
+                    {opt.icon}
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {protectionType === 'password' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        type={showPassword ? 'text' : 'password'}
+                        value={protectionPassword}
+                        onChange={e => {
+                          setProtectionPassword(e.target.value);
+                          protectionPasswordRef.current = e.target.value;
+                          if (!isNew && entry) scheduleAutoSave(entry.id, fieldValues);
+                        }}
+                        placeholder="Enter a password to share with visitors"
+                        className="pr-9 font-mono text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(v => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+                        const pwd = Array.from(crypto.getRandomValues(new Uint8Array(12)))
+                          .map(b => chars[b % chars.length]).join('');
+                        setProtectionPassword(pwd);
+                        protectionPasswordRef.current = pwd;
+                        setShowPassword(true);
+                        if (!isNew && entry) scheduleAutoSave(entry.id, fieldValues);
+                      }}
+                    >
+                      <KeyRound className="h-3.5 w-3.5 mr-1.5" />
+                      Generate
+                    </Button>
+                  </div>
+                  <p className="text-xs text-zinc-400">
+                    Visitors must provide this password via <code className="font-mono">?password=</code> to access this entry through the public API.
+                  </p>
+                </div>
+              )}
+
+              {protectionType === 'jwt' && (
+                <div className="text-xs text-zinc-500 space-y-1">
+                  {jwtProviderName ? (
+                    <p>Requires a valid <strong>{jwtProviderName}</strong> session token in the <code className="font-mono">Authorization: Bearer</code> header.</p>
+                  ) : (
+                    <p className="text-amber-600">
+                      No auth provider configured.{' '}
+                      <a href="/settings" className="underline hover:text-amber-700">Configure one in Settings →</a>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {fields.map(field => {

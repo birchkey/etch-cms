@@ -12,10 +12,14 @@ const CreateEntrySchema = z.object({
   content_type_id: z.string().min(1, 'content_type_id required'),
   slug: z.string().nullable().optional(),
   fields: z.record(z.string(), z.unknown()).optional(),
+  protection_type: z.enum(['password', 'jwt']).nullable().optional(),
+  protection_password: z.string().nullable().optional(),
 });
 const UpdateEntrySchema = z.object({
   slug: z.string().nullable().optional(),
   fields: z.record(z.string(), z.unknown()).optional(),
+  protection_type: z.enum(['password', 'jwt']).nullable().optional(),
+  protection_password: z.string().nullable().optional(),
 });
 const ScheduleEntrySchema = z.object({
   scheduled_at: z.number().int().positive('scheduled_at must be a positive integer'),
@@ -295,8 +299,8 @@ entries.post('/', async (c) => {
   const sortOrder = (maxRow?.m ?? -1) + 1;
 
   await c.env.DB.prepare(
-    'INSERT INTO entries (id, content_type_id, slug, status, has_unpublished_changes, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)'
-  ).bind(id, body.content_type_id, slug, 'draft', sortOrder, now, now).run();
+    'INSERT INTO entries (id, content_type_id, slug, status, has_unpublished_changes, sort_order, created_at, updated_at, protection_type, protection_password) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)'
+  ).bind(id, body.content_type_id, slug, 'draft', sortOrder, now, now, body.protection_type ?? null, body.protection_password ?? null).run();
 
   if (body.fields) {
     const fieldDefs = await c.env.DB.prepare(
@@ -381,6 +385,8 @@ entries.put('/:id', async (c) => {
   const now = Date.now();
   const isPublished = entry.status === 'published';
 
+  const hasProtection = 'protection_type' in body || 'protection_password' in body;
+
   if ('slug' in body) {
     const slug = body.slug ? slugify(body.slug) || null : null;
     if (slug) {
@@ -389,7 +395,15 @@ entries.put('/:id', async (c) => {
       ).bind(entry.content_type_id, slug, id).first();
       if (conflict) return c.json({ error: 'Slug already in use' }, 409);
     }
-    await c.env.DB.prepare('UPDATE entries SET slug = ?, updated_at = ? WHERE id = ?').bind(slug, now, id).run();
+    if (hasProtection) {
+      await c.env.DB.prepare('UPDATE entries SET slug = ?, protection_type = ?, protection_password = ?, updated_at = ? WHERE id = ?')
+        .bind(slug, body.protection_type ?? null, body.protection_password ?? null, now, id).run();
+    } else {
+      await c.env.DB.prepare('UPDATE entries SET slug = ?, updated_at = ? WHERE id = ?').bind(slug, now, id).run();
+    }
+  } else if (hasProtection) {
+    await c.env.DB.prepare('UPDATE entries SET protection_type = ?, protection_password = ?, updated_at = ? WHERE id = ?')
+      .bind(body.protection_type ?? null, body.protection_password ?? null, now, id).run();
   } else {
     await c.env.DB.prepare('UPDATE entries SET updated_at = ? WHERE id = ?').bind(now, id).run();
   }

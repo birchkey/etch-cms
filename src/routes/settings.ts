@@ -6,7 +6,7 @@ import { parseBody } from '../lib/validate';
 
 const settings = new Hono<{ Bindings: Env; Variables: { jwtPayload: unknown } }>();
 
-const ALLOWED_KEYS = ['site_name', 'logo_type', 'logo_image_url', 'accent_color', 'favicon_url', 'upload_limit_mb'] as const;
+const ALLOWED_KEYS = ['site_name', 'logo_type', 'logo_image_url', 'accent_color', 'favicon_url', 'upload_limit_mb', 'jwt_provider', 'jwt_domain', 'jwt_jwks_url', 'jwt_issuer', 'jwt_audience'] as const;
 type SettingsKey = typeof ALLOWED_KEYS[number];
 
 const SettingsBodySchema = z.object({
@@ -16,6 +16,11 @@ const SettingsBodySchema = z.object({
   accent_color: z.string().optional(),
   favicon_url: z.string().optional(),
   upload_limit_mb: z.string().optional(),
+  jwt_provider: z.string().optional(),
+  jwt_domain: z.string().optional(),
+  jwt_jwks_url: z.string().optional(),
+  jwt_issuer: z.string().optional(),
+  jwt_audience: z.string().optional(),
 });
 
 // Subset of keys safe to expose without authentication (used to render the login page).
@@ -37,6 +42,11 @@ settings.get('/', async (c) => {
     if (key in all) pub[key] = all[key];
   }
   return c.json(pub);
+});
+
+// GET /api/settings/admin — admin only, returns all settings including JWT config
+settings.get('/admin', authMiddleware, adminOnly, async (c) => {
+  return c.json(await getAll(c.env.DB));
 });
 
 // PUT /api/settings — admin only

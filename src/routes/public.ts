@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { Env, FieldRow, EntryRow } from '../types';
 import { parseFieldValue, signAssetUrl } from '../lib/utils';
 import { verifySignature } from '../middleware/auth';
+import { verifyExternalJWT } from '../lib/jwks';
 
 function formatDatetime(rawValue: string): Record<string, unknown> | null {
   let datetimeStr: string;
@@ -145,6 +146,35 @@ async function fetchAltTextMap(
     result.set(p, r2KeyToAlt.get(`assets/${p.replace(/^\/r2\//, '')}`) ?? null);
   }
   return result;
+}
+
+async function checkEntryAccess(
+  entry: EntryRow,
+  request: Request,
+  db: D1Database,
+): Promise<boolean> {
+  if (!entry.protection_type) return true;
+
+  if (entry.protection_type === 'password') {
+    const url = new URL(request.url);
+    const provided = url.searchParams.get('password');
+    return provided !== null && provided === entry.protection_password;
+  }
+
+  if (entry.protection_type === 'jwt') {
+    const auth = request.headers.get('Authorization');
+    if (!auth?.startsWith('Bearer ')) return false;
+    const token = auth.slice(7);
+    const { results } = await db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('jwt_jwks_url','jwt_issuer','jwt_audience')"
+    ).all<{ key: string; value: string }>();
+    const cfg: Record<string, string> = {};
+    for (const r of results) cfg[r.key] = r.value;
+    if (!cfg.jwt_jwks_url || !cfg.jwt_issuer) return false;
+    return verifyExternalJWT(token, cfg.jwt_jwks_url, cfg.jwt_issuer, cfg.jwt_audience);
+  }
+
+  return false;
 }
 
 const publicApi = new Hono<{ Bindings: Env }>();
@@ -481,7 +511,7 @@ publicApi.get('/:typeSlug', async (c) => {
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1'));
 
   const countRow = await c.env.DB.prepare(
-    "SELECT COUNT(*) as count FROM entries WHERE content_type_id = ? AND status = 'published'"
+    "SELECT COUNT(*) as count FROM entries WHERE content_type_id = ? AND status = 'published' AND protection_type IS NULL"
   ).bind(ct.id).first<{ count: number }>();
   const total = countRow?.count ?? 0;
 
@@ -491,7 +521,7 @@ publicApi.get('/:typeSlug', async (c) => {
 
   const offset = fetchAll ? 0 : (page - 1) * limit;
   const entriesResult = await c.env.DB.prepare(
-    "SELECT * FROM entries WHERE content_type_id = ? AND status = 'published' ORDER BY sort_order ASC LIMIT ? OFFSET ?"
+    "SELECT * FROM entries WHERE content_type_id = ? AND status = 'published' AND protection_type IS NULL ORDER BY sort_order ASC LIMIT ? OFFSET ?"
   ).bind(ct.id, limit, offset).all<EntryRow>();
 
   // Batch-fetch all entry_fields for this page in one query (avoids N+1)
@@ -555,7 +585,7 @@ publicApi.get('/:typeSlug/random', async (c) => {
 
   // Use ORDER BY RANDOM() LIMIT 1 — efficient for D1/SQLite
   const entry = await c.env.DB.prepare(
-    "SELECT * FROM entries WHERE content_type_id = ? AND status = 'published' ORDER BY RANDOM() LIMIT 1"
+    "SELECT * FROM entries WHERE content_type_id = ? AND status = 'published' AND protection_type IS NULL ORDER BY RANDOM() LIMIT 1"
   ).bind(ct.id).first<EntryRow>();
   if (!entry) return c.json({ error: 'No published entries found' }, 404);
 
@@ -643,6 +673,10 @@ publicApi.get('/:typeSlug/:id', async (c) => {
     "SELECT * FROM entries WHERE content_type_id = ? AND status = 'published' AND (id = ? OR slug = ?) LIMIT 1"
   ).bind(ct.id, id, id).first<EntryRow>();
   if (!entry) return c.json({ error: 'Not found' }, 404);
+
+  if (!(await checkEntryAccess(entry, c.req.raw, c.env.DB))) {
+    return c.json({ error: 'Not found' }, 404);
+  }
 
   const efRows = await c.env.DB.prepare(
     'SELECT * FROM entry_fields WHERE entry_id = ?'

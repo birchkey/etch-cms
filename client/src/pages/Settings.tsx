@@ -4,11 +4,64 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AssetPicker } from '@/components/AssetPicker';
-import { Asset, Webhook, WebhookCreated, webhooksApi } from '@/lib/api';
+import { Asset, Webhook, WebhookCreated, webhooksApi, settingsApi, AdminSettings } from '@/lib/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, Type, Image as ImageIcon, X, Plus, Trash2, FlaskConical, Copy } from 'lucide-react';
+import { Loader2, Type, Image as ImageIcon, X, Plus, Trash2, FlaskConical, Copy, ChevronDown, ChevronUp, CheckCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
+type JwtProvider = 'none' | 'clerk' | 'auth0' | 'supabase' | 'firebase' | 'custom';
+
+const PROVIDER_LABELS: Record<JwtProvider, string> = {
+  none: 'None',
+  clerk: 'Clerk',
+  auth0: 'Auth0',
+  supabase: 'Supabase',
+  firebase: 'Firebase Auth',
+  custom: 'Custom / Other',
+};
+
+const PROVIDER_DOMAIN_LABEL: Record<JwtProvider, string> = {
+  none: '',
+  clerk: 'Clerk Domain',
+  auth0: 'Auth0 Domain',
+  supabase: 'Supabase Project URL',
+  firebase: 'Firebase Project ID',
+  custom: 'JWKS URL',
+};
+
+const PROVIDER_DOMAIN_HINT: Record<JwtProvider, string> = {
+  none: '',
+  clerk: 'e.g. https://your-app.clerk.accounts.dev — found in Clerk Dashboard under API Keys',
+  auth0: 'e.g. your-tenant.us.auth0.com',
+  supabase: 'e.g. https://xyz.supabase.co',
+  firebase: 'e.g. my-firebase-project',
+  custom: 'Full JWKS endpoint URL',
+};
+
+function deriveJwtConfig(provider: JwtProvider, domain: string): { jwks_url: string; issuer: string } | null {
+  const d = domain.trim().replace(/\/$/, '');
+  if (!d || provider === 'none' || provider === 'custom') return null;
+  switch (provider) {
+    case 'clerk': {
+      const base = d.startsWith('http') ? d : `https://${d}`;
+      return { jwks_url: `${base}/.well-known/jwks.json`, issuer: base };
+    }
+    case 'auth0': {
+      const base = d.startsWith('http') ? d : `https://${d}`;
+      return { jwks_url: `${base}/.well-known/jwks.json`, issuer: `${base}/` };
+    }
+    case 'supabase': {
+      const base = d.startsWith('http') ? d : `https://${d}`;
+      return { jwks_url: `${base}/auth/v1/.well-known/jwks.json`, issuer: `${base}/auth/v1` };
+    }
+    case 'firebase':
+      return {
+        jwks_url: 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com',
+        issuer: `https://securetoken.google.com/${d}`,
+      };
+  }
+}
 import {
   ACCENT_PRESETS,
   isValidHex,
@@ -83,6 +136,69 @@ export default function Settings() {
       toast.error('Test failed');
     } finally {
       setTestingId(null);
+    }
+  };
+
+  // JWT / auth provider state
+  const [jwtProvider, setJwtProvider] = useState<JwtProvider>('none');
+  const [jwtDomain, setJwtDomain] = useState('');
+  const [jwtIssuer, setJwtIssuer] = useState('');
+  const [jwtAudience, setJwtAudience] = useState('');
+  const [jwtShowAdvanced, setJwtShowAdvanced] = useState(false);
+  const [savingJwt, setSavingJwt] = useState(false);
+  const [testingJwt, setTestingJwt] = useState(false);
+  const [testResult, setTestResult] = useState<'ok' | 'fail' | null>(null);
+
+  useEffect(() => {
+    settingsApi.getAdmin().then((s: AdminSettings) => {
+      const p = (s.jwt_provider || 'none') as JwtProvider;
+      setJwtProvider(p);
+      setJwtDomain(s.jwt_domain ?? '');
+      setJwtIssuer(s.jwt_issuer ?? '');
+      setJwtAudience(s.jwt_audience ?? '');
+    }).catch(() => {});
+  }, []);
+
+  const derivedConfig = deriveJwtConfig(jwtProvider, jwtDomain);
+  const effectiveJwksUrl = jwtProvider === 'custom' ? jwtDomain : (derivedConfig?.jwks_url ?? '');
+  const effectiveIssuer = jwtProvider === 'custom' ? jwtIssuer : (derivedConfig?.issuer ?? '');
+
+  const handleSaveJwt = async () => {
+    setSavingJwt(true);
+    setTestResult(null);
+    try {
+      if (jwtProvider === 'none') {
+        await settingsApi.update({ jwt_provider: '', jwt_domain: '', jwt_jwks_url: '', jwt_issuer: '', jwt_audience: '' });
+      } else {
+        await settingsApi.update({
+          jwt_provider: jwtProvider,
+          jwt_domain: jwtDomain,
+          jwt_jwks_url: effectiveJwksUrl,
+          jwt_issuer: effectiveIssuer,
+          jwt_audience: jwtAudience,
+        });
+      }
+      toast.success('Auth provider saved');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSavingJwt(false);
+    }
+  };
+
+  const handleTestJwt = async () => {
+    if (!effectiveJwksUrl) return;
+    setTestingJwt(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(effectiveJwksUrl);
+      const data = await res.json() as unknown;
+      const ok = res.ok && typeof data === 'object' && data !== null && 'keys' in data && Array.isArray((data as { keys: unknown }).keys);
+      setTestResult(ok ? 'ok' : 'fail');
+    } catch {
+      setTestResult('fail');
+    } finally {
+      setTestingJwt(false);
     }
   };
 
@@ -396,6 +512,112 @@ export default function Settings() {
             </div>
             <span className="text-sm text-zinc-500">per file</span>
           </div>
+        </section>
+
+        {/* Auth Provider */}
+        <section className="bg-white rounded-xl border border-zinc-200 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-zinc-800">Auth Provider</h2>
+              <p className="text-sm text-zinc-500 mt-0.5">
+                Configure a JWT auth service to protect entries via the public API.
+              </p>
+            </div>
+            <Button size="sm" onClick={handleSaveJwt} disabled={savingJwt}>
+              {savingJwt && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save
+            </Button>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Service</Label>
+            <select
+              value={jwtProvider}
+              onChange={e => { setJwtProvider(e.target.value as JwtProvider); setTestResult(null); }}
+              className="w-full h-9 rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {(Object.keys(PROVIDER_LABELS) as JwtProvider[]).map(p => (
+                <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+              ))}
+            </select>
+          </div>
+
+          {jwtProvider !== 'none' && (
+            <>
+              <div className="space-y-1.5">
+                <Label>{PROVIDER_DOMAIN_LABEL[jwtProvider]}</Label>
+                <Input
+                  value={jwtDomain}
+                  onChange={e => { setJwtDomain(e.target.value); setTestResult(null); }}
+                  placeholder={PROVIDER_DOMAIN_HINT[jwtProvider]}
+                />
+                <p className="text-xs text-zinc-400">{PROVIDER_DOMAIN_HINT[jwtProvider]}</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Audience <span className="text-zinc-400 font-normal">(optional)</span></Label>
+                <Input
+                  value={jwtAudience}
+                  onChange={e => setJwtAudience(e.target.value)}
+                  placeholder="Leave blank if not required by your provider"
+                />
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setJwtShowAdvanced(v => !v)}
+                  className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600"
+                >
+                  {jwtShowAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  Advanced
+                </button>
+                {jwtShowAdvanced && (
+                  <div className="mt-3 space-y-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-zinc-500">JWKS URL</Label>
+                      {jwtProvider === 'custom' ? (
+                        <Input value={jwtDomain} onChange={e => setJwtDomain(e.target.value)} className="font-mono text-xs" />
+                      ) : (
+                        <p className="font-mono text-xs text-zinc-500 bg-zinc-50 rounded px-2 py-1.5 border border-zinc-200">{effectiveJwksUrl || '—'}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-zinc-500">Issuer</Label>
+                      {jwtProvider === 'custom' ? (
+                        <Input value={jwtIssuer} onChange={e => setJwtIssuer(e.target.value)} className="font-mono text-xs" />
+                      ) : (
+                        <p className="font-mono text-xs text-zinc-500 bg-zinc-50 rounded px-2 py-1.5 border border-zinc-200">{effectiveIssuer || '—'}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestJwt}
+                  disabled={testingJwt || !effectiveJwksUrl}
+                >
+                  {testingJwt ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  Test Connection
+                </Button>
+                {testResult === 'ok' && (
+                  <span className="flex items-center gap-1 text-xs text-green-600">
+                    <CheckCircle2 className="h-4 w-4" /> JWKS endpoint reachable
+                  </span>
+                )}
+                {testResult === 'fail' && (
+                  <span className="flex items-center gap-1 text-xs text-red-500">
+                    <XCircle className="h-4 w-4" /> Could not reach JWKS endpoint
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </section>
 
         {/* Webhooks */}

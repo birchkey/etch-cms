@@ -55,6 +55,8 @@ export interface EntryRow {
   updated_at: number;
   published_at: number | null;
   scheduled_at: number | null;
+  protection_type: 'password' | 'jwt' | null;
+  protection_password: string | null;
 }
 
 export interface WebhookRow {

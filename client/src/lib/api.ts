@@ -242,6 +242,8 @@ export interface Entry {
   updated_at: number;
   published_at: number | null;
   scheduled_at: number | null;
+  protection_type: 'password' | 'jwt' | null;
+  protection_password: string | null;
   fields: Record<string, unknown>;
   fieldDefs?: Field[];
 }
@@ -292,10 +294,10 @@ export const entriesApi = {
   attention: () => request<AttentionItem[]>('/entries/attention'),
   recent: () => request<RecentEntry[]>('/entries/recent'),
   upcoming: () => request<UpcomingEntry[]>('/entries/upcoming'),
-  create: (data: { content_type_id: string; slug?: string | null; fields?: Record<string, unknown> }) =>
+  create: (data: { content_type_id: string; slug?: string | null; fields?: Record<string, unknown>; protection_type?: 'password' | 'jwt' | null; protection_password?: string | null }) =>
     request<Entry>('/entries', { method: 'POST', body: JSON.stringify(data) }),
   get: (id: string) => request<Entry>(`/entries/${id}`),
-  update: (id: string, data: { slug?: string | null; fields?: Record<string, unknown> }) =>
+  update: (id: string, data: { slug?: string | null; fields?: Record<string, unknown>; protection_type?: 'password' | 'jwt' | null; protection_password?: string | null }) =>
     request<Entry>(`/entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   publish: (id: string) => request<PublishResult>(`/entries/${id}/publish`, { method: 'PATCH' }),
   unpublish: (id: string) => request<Entry>(`/entries/${id}/unpublish`, { method: 'PATCH' }),
@@ -371,9 +373,18 @@ export const auditLogApi = {
 };
 
 // Settings
+export interface AdminSettings {
+  jwt_provider?: string;
+  jwt_domain?: string;
+  jwt_jwks_url?: string;
+  jwt_issuer?: string;
+  jwt_audience?: string;
+}
+
 export const settingsApi = {
   update: (data: Record<string, unknown>) =>
     request<Record<string, unknown>>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  getAdmin: () => request<AdminSettings>('/settings/admin'),
 };
 
 // Assets
