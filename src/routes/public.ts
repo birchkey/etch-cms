@@ -3,6 +3,73 @@ import { Env, FieldRow, EntryRow } from '../types';
 import { parseFieldValue, signAssetUrl } from '../lib/utils';
 import { verifySignature } from '../middleware/auth';
 
+function formatDatetime(rawValue: string): Record<string, unknown> | null {
+  let datetimeStr: string;
+  let timezone: string | null = null;
+
+  try {
+    const parsed = JSON.parse(rawValue) as { datetime?: string; timezone?: string };
+    if (parsed && typeof parsed === 'object' && 'datetime' in parsed) {
+      datetimeStr = parsed.datetime ?? '';
+      timezone = parsed.timezone ?? null;
+    } else {
+      datetimeStr = rawValue;
+    }
+  } catch {
+    datetimeStr = rawValue;
+  }
+
+  if (!datetimeStr) return null;
+
+  const match = datetimeStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) {
+    return { iso: datetimeStr, long: null, date: null, time: null, timestamp: null, timezone };
+  }
+
+  const [, yyyy, MM, dd, HH, mm] = match;
+  // Construct a UTC Date using the wall-clock components so Intl formatting at
+  // timeZone:'UTC' always produces the exact hour/minute the user entered.
+  const wallUtcMs = Date.UTC(+yyyy, +MM - 1, +dd, +HH, +mm, 0);
+  const d = new Date(wallUtcMs);
+
+  const longStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(d);
+
+  const dateStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric',
+  }).format(d);
+
+  const timeStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(d);
+
+  // Derive the correct UTC epoch for this wall-clock time in the stored timezone.
+  // Strategy: format wallUtcMs in the target timezone to find the offset it applies,
+  // then shift accordingly (single-iteration; accurate for all non-ambiguous times).
+  let timestamp: number;
+  if (timezone) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false,
+      }).formatToParts(d);
+      const p: Record<string, number> = {};
+      for (const part of parts) if (part.type !== 'literal') p[part.type] = parseInt(part.value);
+      const tzDisplayedAsUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second ?? 0);
+      const offset = wallUtcMs - tzDisplayedAsUtc;
+      timestamp = Math.floor((wallUtcMs + offset) / 1000);
+    } catch {
+      timestamp = Math.floor(wallUtcMs / 1000);
+    }
+  } else {
+    timestamp = Math.floor(wallUtcMs / 1000);
+  }
+
+  return { iso: datetimeStr, long: longStr, date: dateStr, time: timeStr, timestamp, timezone };
+}
+
 function addHeadingIds(html: string): string {
   return html.replace(/<(h[12])>(.*?)<\/\1>/gis, (match, tag, content) => {
     const text = content.replace(/<[^>]+>/g, '').trim();
@@ -156,6 +223,8 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
       } else {
         fieldValues[f.slug] = parsed;
       }
+    } else if (f.type === 'datetime') {
+      fieldValues[f.slug] = rawValue ? formatDatetime(rawValue) : null;
     } else if (f.type === 'phone' && rawValue) {
       fieldValues[f.slug] = rawValue;
       fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
@@ -192,6 +261,9 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
                 /src="(\/r2\/[^"]+)"/g,
                 () => `src="${baseUrl}${signedPaths[ri++]}"`
               ));
+            } else if (sf.type === 'datetime') {
+              const rawVal = val === null ? null : (typeof val === 'string' ? val : JSON.stringify(val));
+              expanded[sf.slug] = rawVal ? formatDatetime(rawVal) : null;
             } else {
               expanded[sf.slug] = val;
             }
@@ -326,6 +398,8 @@ async function hydrateRelatedEntry(
         () => `src="${baseUrl}${signedPaths[ri++]}"`
       );
       fieldValues[f.slug] = addHeadingIds(withImages);
+    } else if (f.type === 'datetime') {
+      fieldValues[f.slug] = rawValue ? formatDatetime(rawValue) : null;
     } else if (f.type === 'phone' && rawValue) {
       fieldValues[f.slug] = rawValue;
       fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
@@ -362,6 +436,9 @@ async function hydrateRelatedEntry(
                 /src="(\/r2\/[^"]+)"/g,
                 () => `src="${baseUrl}${signedPaths[ri++]}"`
               ));
+            } else if (sf.type === 'datetime') {
+              const rawVal = val === null ? null : (typeof val === 'string' ? val : JSON.stringify(val));
+              expanded[sf.slug] = rawVal ? formatDatetime(rawVal) : null;
             } else {
               expanded[sf.slug] = val;
             }

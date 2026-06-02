@@ -9,6 +9,13 @@ export function parseFieldValue(value: string | null, type: string): unknown {
   if (type === 'relation' || type === 'select' || type === 'image' || type === 'repeater') {
     try { return JSON.parse(value); } catch { return value; }
   }
+  if (type === 'datetime') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch { /* legacy plain string */ }
+    return value;
+  }
   return value;
 }
 

@@ -75,6 +75,23 @@ function AssetThumbnail({ url, name, className }: { url: string; name?: string |
   );
 }
 
+const ALL_TIMEZONES: readonly string[] =
+  typeof Intl !== 'undefined' && 'supportedValuesOf' in Intl
+    ? (Intl as { supportedValuesOf(key: string): string[] }).supportedValuesOf('timeZone')
+    : [];
+
+function parseDatetimeValue(value: unknown): { datetime: string; timezone: string } {
+  const defaultTz =
+    typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : '';
+  if (!value) return { datetime: '', timezone: defaultTz };
+  if (typeof value === 'string') return { datetime: value, timezone: defaultTz };
+  if (typeof value === 'object' && value !== null) {
+    const v = value as { datetime?: string; timezone?: string };
+    return { datetime: v.datetime ?? '', timezone: v.timezone ?? defaultTz };
+  }
+  return { datetime: '', timezone: defaultTz };
+}
+
 interface FieldValueEditorProps {
   field: Field;
   value: unknown;
@@ -136,14 +153,34 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
         />
       );
 
-    case 'datetime':
+    case 'datetime': {
+      const dtParsed = parseDatetimeValue(value);
+      const tzListId = `tz-${field.id}`;
       return (
-        <Input
-          type="datetime-local"
-          value={(value as string) ?? ''}
-          onChange={e => onChange(e.target.value)}
-        />
+        <div className="space-y-2">
+          <Input
+            type="datetime-local"
+            value={dtParsed.datetime}
+            onChange={e => onChange({ datetime: e.target.value, timezone: dtParsed.timezone })}
+          />
+          <div className="space-y-1">
+            <Label className="text-xs text-zinc-500">Time zone</Label>
+            <Input
+              list={tzListId}
+              value={dtParsed.timezone}
+              onChange={e => onChange({ datetime: dtParsed.datetime, timezone: e.target.value })}
+              placeholder="e.g. America/Chicago"
+              className="font-mono text-sm"
+            />
+            <datalist id={tzListId}>
+              {ALL_TIMEZONES.map(tz => (
+                <option key={tz} value={tz} />
+              ))}
+            </datalist>
+          </div>
+        </div>
       );
+    }
 
     case 'boolean':
       return (

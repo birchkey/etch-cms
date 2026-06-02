@@ -56,6 +56,14 @@ function serializeFieldValue(value: unknown, type: string): string | null {
   if (type === 'number') return String(value);
   if (type === 'relation' || type === 'repeater') return JSON.stringify(value);
   if (Array.isArray(value)) return JSON.stringify(value); // multiple image, multiple select
+  if (type === 'datetime') {
+    if (typeof value === 'object' && value !== null) {
+      const v = value as { datetime?: string; timezone?: string };
+      if (!v.datetime) return null;
+      return JSON.stringify(v);
+    }
+    return value ? String(value) : null;
+  }
   return String(value);
 }
 
