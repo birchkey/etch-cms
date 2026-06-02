@@ -585,6 +585,46 @@ publicApi.get('/:typeSlug', async (c) => {
   });
 });
 
+// GET /api/public/:typeSlug/first
+// Declared before /:typeSlug/:id so "first" is never treated as an entry ID.
+publicApi.get('/:typeSlug/first', async (c) => {
+  const { typeSlug } = c.req.param();
+  const baseUrl = new URL(c.req.url).origin;
+
+  const ct = await c.env.DB.prepare(
+    'SELECT * FROM content_types WHERE slug = ?'
+  ).bind(typeSlug).first<{ id: string }>();
+  if (!ct) return c.json({ error: 'Content type not found' }, 404);
+
+  const entry = await c.env.DB.prepare(
+    "SELECT * FROM entries WHERE content_type_id = ? AND status = 'published' AND protection_type IS NULL ORDER BY sort_order ASC LIMIT 1"
+  ).bind(ct.id).first<EntryRow>();
+  if (!entry) return c.json({ error: 'No published entries found' }, 404);
+
+  const fields = await c.env.DB.prepare(
+    'SELECT * FROM fields WHERE content_type_id = ? ORDER BY sort_order'
+  ).bind(ct.id).all<FieldRow>();
+
+  const efRows = await c.env.DB.prepare(
+    'SELECT * FROM entry_fields WHERE entry_id = ?'
+  ).bind(entry.id).all<{ entry_id: string; field_id: string; value: string | null }>();
+  const relationFieldIds = new Set(fields.results.filter(f => f.type === 'relation').map(f => f.id));
+  const relatedData = await buildRelatedData(c.env.DB, efRows.results, relationFieldIds);
+  const relEfRows = [...relatedData.efRows.values()].flat();
+  const allImageFieldIds = new Set([
+    ...fields.results.filter(f => f.type === 'image').map(f => f.id),
+    ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'image').map(f => f.id),
+  ]);
+  const allRepeaterFields = new Map([
+    ...fields.results.filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+    ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
+  ]);
+  const imagePaths = extractImagePaths([...efRows.results, ...relEfRows], allImageFieldIds, allRepeaterFields);
+  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
+  const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, altTextMap, relatedData, c.env.JWT_SECRET);
+  return c.json({ data });
+});
+
 // GET /api/public/:typeSlug/random
 // Declared before /:typeSlug/:id so "random" is never treated as an entry ID.
 publicApi.get('/:typeSlug/random', async (c) => {
