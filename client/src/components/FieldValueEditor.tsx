@@ -77,7 +77,7 @@ function AssetThumbnail({ url, name, className }: { url: string; name?: string |
 
 const ALL_TIMEZONES: readonly string[] =
   typeof Intl !== 'undefined' && 'supportedValuesOf' in Intl
-    ? (Intl as { supportedValuesOf(key: string): string[] }).supportedValuesOf('timeZone')
+    ? (Intl as unknown as { supportedValuesOf(key: string): string[] }).supportedValuesOf('timeZone')
     : [];
 
 function parseDatetimeValue(value: unknown): { datetime: string; timezone: string } {
