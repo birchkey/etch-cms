@@ -132,7 +132,7 @@ export interface RepeaterSubfield {
   id: string;
   name: string;
   slug: string;
-  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'select' | 'email' | 'phone' | 'color';
+  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'select' | 'email' | 'phone' | 'color' | 'icon';
   required: boolean;
   multiple: boolean; // for image and select
   select_options: string | null; // JSON array string
@@ -146,7 +146,7 @@ export interface Field {
   content_type_id: string;
   name: string;
   slug: string;
-  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color' | 'repeater';
+  type: 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color' | 'repeater' | 'icon';
   required: number;
   sort_order: number;
   relation_content_type_id: string | null;

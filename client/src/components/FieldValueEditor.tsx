@@ -23,7 +23,9 @@ import { RichTextEditor } from './RichTextEditor';
 import { AssetPicker } from './AssetPicker';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical } from 'lucide-react';
+import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical, ChevronDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { FaIconMeta } from '@/lib/fa-icons';
 
 function assetTypeFromUrl(url: string): 'image' | 'video' | 'pdf' | 'file' {
   const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
@@ -90,6 +92,140 @@ function parseDatetimeValue(value: unknown): { datetime: string; timezone: strin
     return { datetime: v.datetime ?? '', timezone: v.timezone ?? defaultTz };
   }
   return { datetime: '', timezone: defaultTz };
+}
+
+function IconPicker({ value, onChange }: { value: string; onChange: (v: unknown) => void }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [style, setStyle] = useState<'solid' | 'regular' | 'brands'>('solid');
+  const [icons, setIcons] = useState<FaIconMeta[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const id = 'fa-cdn-css';
+    if (!document.getElementById(id)) {
+      const link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css';
+      document.head.appendChild(link);
+    }
+    import('@/lib/fa-icons').then(m => setIcons(m.FA_ICONS));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [open]);
+
+  const currentStyle = useMemo<'solid' | 'regular' | 'brands'>(() => {
+    if (!value) return 'solid';
+    if (value.includes('fa-brands')) return 'brands';
+    if (value.includes('fa-regular')) return 'regular';
+    return 'solid';
+  }, [value]);
+  const currentName = useMemo(() => value?.match(/fa-([\w-]+)\s*$/)?.[1] ?? null, [value]);
+
+  const filtered = useMemo(() => {
+    const styleIcons = icons.filter(icon => icon.s.includes(style));
+    if (!search.trim()) return styleIcons.slice(0, 200);
+    const q = search.toLowerCase();
+    return styleIcons
+      .filter(icon => icon.n.includes(q) || icon.l.toLowerCase().includes(q) || icon.t.some(t => t.includes(q)))
+      .slice(0, 200);
+  }, [icons, style, search]);
+
+  const handleOpen = () => {
+    setStyle(currentStyle);
+    setSearch('');
+    setOpen(true);
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => open ? setOpen(false) : handleOpen()}
+        className="flex items-center gap-2 h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-left hover:border-zinc-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+      >
+        {value ? (
+          <>
+            <i className={`${value} text-zinc-700 w-4 text-center`} />
+            <span className="font-mono text-xs text-zinc-500 flex-1 truncate">{value}</span>
+          </>
+        ) : (
+          <span className="text-zinc-400 flex-1">Pick an icon…</span>
+        )}
+        <ChevronDown className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 left-0 w-80 bg-white border border-zinc-200 rounded-xl shadow-lg">
+          <div className="p-3 space-y-2 border-b border-zinc-100">
+            <Input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search icons…"
+              autoFocus
+              className="h-8 text-sm"
+            />
+            <div className="flex gap-1">
+              {(['solid', 'regular', 'brands'] as const).map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStyle(s)}
+                  className={cn(
+                    'px-2.5 py-1 rounded text-xs font-medium capitalize transition-colors',
+                    style === s ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:bg-zinc-100'
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="p-2 grid grid-cols-6 gap-0.5 max-h-60 overflow-y-auto">
+            {filtered.map(icon => (
+              <button
+                key={icon.n}
+                type="button"
+                title={icon.l}
+                onClick={() => { onChange(`fa-${style} fa-${icon.n}`); setOpen(false); }}
+                className={cn(
+                  'flex flex-col items-center gap-0.5 p-1.5 rounded hover:bg-zinc-100 transition-colors text-zinc-600 min-w-0',
+                  currentName === icon.n && currentStyle === style && 'bg-indigo-50 text-indigo-600 ring-1 ring-indigo-200'
+                )}
+              >
+                <i className={`fa-${style} fa-${icon.n} text-sm`} />
+                <span className="text-[9px] text-zinc-400 truncate w-full text-center">{icon.n}</span>
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="col-span-6 py-8 text-center text-sm text-zinc-400">No icons found</div>
+            )}
+          </div>
+          {value && (
+            <div className="px-3 py-2 border-t border-zinc-100">
+              <button
+                type="button"
+                onClick={() => { onChange(null); setOpen(false); }}
+                className="text-xs text-zinc-400 hover:text-red-500 transition-colors"
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface FieldValueEditorProps {
@@ -249,6 +385,9 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
         </Select>
       );
     }
+
+    case 'icon':
+      return <IconPicker value={(value as string) ?? ''} onChange={onChange} />;
 
     case 'relation':
       return (

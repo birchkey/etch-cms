@@ -3,6 +3,11 @@ import { Env, FieldRow, EntryRow } from '../types';
 import { parseFieldValue, signAssetUrl } from '../lib/utils';
 import { verifySignature } from '../middleware/auth';
 import { verifyExternalJWT } from '../lib/jwks';
+import { faGlyph } from '../lib/fa-icons';
+
+function formatIcon(faClass: string): { class: string; glyph: string | null } {
+  return { class: faClass, glyph: faGlyph(faClass) };
+}
 
 function formatDatetime(rawValue: string): Record<string, unknown> | null {
   let datetimeStr: string;
@@ -255,6 +260,8 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
       }
     } else if (f.type === 'datetime') {
       fieldValues[f.slug] = rawValue ? formatDatetime(rawValue) : null;
+    } else if (f.type === 'icon') {
+      fieldValues[f.slug] = rawValue ? formatIcon(rawValue) : null;
     } else if (f.type === 'phone' && rawValue) {
       fieldValues[f.slug] = rawValue;
       fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
@@ -294,6 +301,8 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
             } else if (sf.type === 'datetime') {
               const rawVal = val === null ? null : (typeof val === 'string' ? val : JSON.stringify(val));
               expanded[sf.slug] = rawVal ? formatDatetime(rawVal) : null;
+            } else if (sf.type === 'icon') {
+              expanded[sf.slug] = val ? formatIcon(String(val)) : null;
             } else {
               expanded[sf.slug] = val;
             }
@@ -430,6 +439,8 @@ async function hydrateRelatedEntry(
       fieldValues[f.slug] = addHeadingIds(withImages);
     } else if (f.type === 'datetime') {
       fieldValues[f.slug] = rawValue ? formatDatetime(rawValue) : null;
+    } else if (f.type === 'icon') {
+      fieldValues[f.slug] = rawValue ? formatIcon(rawValue) : null;
     } else if (f.type === 'phone' && rawValue) {
       fieldValues[f.slug] = rawValue;
       fieldValues[`${f.slug}_digits`] = rawValue.replace(/\D/g, '');
@@ -469,6 +480,8 @@ async function hydrateRelatedEntry(
             } else if (sf.type === 'datetime') {
               const rawVal = val === null ? null : (typeof val === 'string' ? val : JSON.stringify(val));
               expanded[sf.slug] = rawVal ? formatDatetime(rawVal) : null;
+            } else if (sf.type === 'icon') {
+              expanded[sf.slug] = val ? formatIcon(String(val)) : null;
             } else {
               expanded[sf.slug] = val;
             }

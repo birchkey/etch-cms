@@ -42,7 +42,7 @@ export interface FieldRow {
   created_at: number;
 }
 
-export type FieldType = 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color' | 'repeater';
+export type FieldType = 'text' | 'rich_text' | 'image' | 'number' | 'datetime' | 'boolean' | 'relation' | 'select' | 'email' | 'phone' | 'color' | 'repeater' | 'icon';
 
 export interface EntryRow {
   id: string;

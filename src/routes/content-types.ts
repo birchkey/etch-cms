@@ -11,7 +11,7 @@ const FieldSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1, 'Field name required'),
   slug: z.string().optional(),
-  type: z.enum(['text', 'rich_text', 'image', 'number', 'datetime', 'boolean', 'relation', 'select', 'email', 'phone', 'color', 'repeater']),
+  type: z.enum(['text', 'rich_text', 'image', 'number', 'datetime', 'boolean', 'relation', 'select', 'email', 'phone', 'color', 'repeater', 'icon']),
   required: z.boolean().optional(),
   multiple: z.boolean().optional(),
   sort_order: z.number().optional(),
