@@ -522,20 +522,92 @@ publicApi.get('/:typeSlug', async (c) => {
   const FETCH_ALL_CAP = 10_000;
   const limit = fetchAll ? FETCH_ALL_CAP : Math.min(1000, Math.max(1, parseInt(limitParam) || 100));
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1'));
+  const offset = fetchAll ? 0 : (page - 1) * limit;
 
-  const countRow = await c.env.DB.prepare(
-    "SELECT COUNT(*) as count FROM entries WHERE content_type_id = ? AND status = 'published' AND protection_type IS NULL"
-  ).bind(ct.id).first<{ count: number }>();
-  const total = countRow?.count ?? 0;
+  // Sort params
+  const sortByParam = c.req.query('sort_by')?.trim() ?? '';
+  const sortDirParam = c.req.query('sort_dir')?.toLowerCase();
+  const BUILTIN_SORT_COLS = new Set(['created_at', 'updated_at', 'published_at', 'sort_order']);
 
+  // Date filter params
+  const dateFieldSlug = c.req.query('date_field')?.trim() ?? '';
+  const dateFilterParam = c.req.query('date_filter')?.toLowerCase();
+  const dateFilter = (dateFilterParam === 'future' || dateFilterParam === 'past') ? dateFilterParam : null;
+  const hasDateFilter = dateFilter !== null && dateFieldSlug !== '';
+
+  // Fetch fields first — needed for date filter validation and field-based sorting
   const fields = await c.env.DB.prepare(
     'SELECT * FROM fields WHERE content_type_id = ? ORDER BY sort_order'
   ).bind(ct.id).all<FieldRow>();
+  const fieldsBySlug = new Map(fields.results.map(f => [f.slug, f]));
 
-  const offset = fetchAll ? 0 : (page - 1) * limit;
+  // Validate date filter field
+  let dateFieldRow: FieldRow | null = null;
+  if (hasDateFilter) {
+    dateFieldRow = fieldsBySlug.get(dateFieldSlug) ?? null;
+    if (!dateFieldRow || dateFieldRow.type !== 'datetime') {
+      return c.json({ error: 'date_field must reference a valid datetime field' }, 400);
+    }
+  }
+
+  // Resolve effective sort_by: explicit param → date_field when filtering → default
+  const effectiveSortBy = sortByParam !== '' ? sortByParam : (hasDateFilter ? dateFieldSlug : 'sort_order');
+  const sortByIsBuiltin = BUILTIN_SORT_COLS.has(effectiveSortBy);
+  const sortByField = !sortByIsBuiltin ? (fieldsBySlug.get(effectiveSortBy) ?? null) : null;
+
+  // Default direction: future → ASC (soonest first), past → DESC (most recent first)
+  const defaultDir: 'ASC' | 'DESC' = hasDateFilter && dateFilter === 'past' ? 'DESC' : 'ASC';
+  const sortDir: 'ASC' | 'DESC' = sortDirParam === 'desc' ? 'DESC' : sortDirParam === 'asc' ? 'ASC' : defaultDir;
+
+  // Build JOIN clauses (entry_fields joined by field ID, already resolved above)
+  let joins = '';
+  const joinBindings: unknown[] = [];
+
+  if (hasDateFilter) {
+    joins += ' JOIN entry_fields ef_date ON ef_date.entry_id = e.id AND ef_date.field_id = ?';
+    joinBindings.push(dateFieldRow!.id);
+  }
+  if (sortByField && sortByField.id !== dateFieldRow?.id) {
+    joins += ' LEFT JOIN entry_fields ef_sort ON ef_sort.entry_id = e.id AND ef_sort.field_id = ?';
+    joinBindings.push(sortByField.id);
+  }
+
+  // Build WHERE clause
+  let whereClause = "WHERE e.content_type_id = ? AND e.status = 'published' AND e.protection_type IS NULL";
+  const whereBindings: unknown[] = [ct.id];
+
+  if (hasDateFilter) {
+    const op = dateFilter === 'future' ? '>' : '<';
+    whereClause += ` AND strftime('%s', json_extract(ef_date.value, '$.datetime')) ${op} strftime('%s', 'now')`;
+  }
+
+  // Build ORDER BY clause
+  let orderBy: string;
+  if (sortByIsBuiltin) {
+    orderBy = `e.${effectiveSortBy} ${sortDir}`;
+  } else if (sortByField) {
+    const alias = sortByField.id === dateFieldRow?.id ? 'ef_date' : 'ef_sort';
+    if (sortByField.type === 'datetime') {
+      orderBy = `strftime('%s', json_extract(${alias}.value, '$.datetime')) ${sortDir}`;
+    } else if (sortByField.type === 'number') {
+      orderBy = `CAST(${alias}.value AS REAL) ${sortDir}`;
+    } else {
+      orderBy = `${alias}.value ${sortDir}`;
+    }
+  } else {
+    orderBy = 'e.sort_order ASC';
+  }
+
+  const baseBindings = [...joinBindings, ...whereBindings];
+
+  const countRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) as count FROM entries e${joins} ${whereClause}`
+  ).bind(...baseBindings).first<{ count: number }>();
+  const total = countRow?.count ?? 0;
+
   const entriesResult = await c.env.DB.prepare(
-    "SELECT * FROM entries WHERE content_type_id = ? AND status = 'published' AND protection_type IS NULL ORDER BY sort_order ASC LIMIT ? OFFSET ?"
-  ).bind(ct.id, limit, offset).all<EntryRow>();
+    `SELECT e.* FROM entries e${joins} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`
+  ).bind(...baseBindings, limit, offset).all<EntryRow>();
 
   // Batch-fetch all entry_fields for this page in one query (avoids N+1)
   const entryIds = entriesResult.results.map(e => e.id);

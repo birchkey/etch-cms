@@ -95,7 +95,7 @@ CREATE TABLE settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO settings (key, value) VALUES ('site_name', 'Basic CMS');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('site_name', 'Etch CMS');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('logo_type', 'text');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('logo_image_url', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('accent_color', '#4f46e5');
