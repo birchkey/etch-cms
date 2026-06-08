@@ -93,6 +93,21 @@ async function getAltText(db: D1Database, storedPath: string): Promise<string | 
 
 // Collect all image paths from ef rows, including paths inside repeater field values.
 // Returns a set of stored paths like "/r2/abc.jpg".
+async function queryInChunks<T>(
+  db: D1Database,
+  sqlFn: (placeholders: string) => string,
+  ids: string[],
+  chunkSize = 50
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
+  const results = await Promise.all(
+    chunks.map(chunk => db.prepare(sqlFn(chunk.map(() => '?').join(','))).bind(...chunk).all<T>())
+  );
+  return results.flatMap(r => r.results);
+}
+
 function extractImagePaths(
   efRows: { field_id: string; value: string | null }[],
   imageFieldIds: Set<string>,
@@ -140,12 +155,13 @@ async function fetchAltTextMap(
   if (paths.size === 0) return new Map();
 
   const r2Keys = [...paths].map(p => `assets/${p.replace(/^\/r2\//, '')}`);
-  const placeholders = r2Keys.map(() => '?').join(',');
-  const rows = await db.prepare(
-    `SELECT r2_key, alt_text FROM assets WHERE r2_key IN (${placeholders})`
-  ).bind(...r2Keys).all<{ r2_key: string; alt_text: string | null }>();
+  const rows = await queryInChunks<{ r2_key: string; alt_text: string | null }>(
+    db,
+    p => `SELECT r2_key, alt_text FROM assets WHERE r2_key IN (${p})`,
+    r2Keys
+  );
 
-  const r2KeyToAlt = new Map(rows.results.map(r => [r.r2_key, r.alt_text]));
+  const r2KeyToAlt = new Map(rows.map(r => [r.r2_key, r.alt_text]));
   const result = new Map<string, string | null>();
   for (const p of paths) {
     result.set(p, r2KeyToAlt.get(`assets/${p.replace(/^\/r2\//, '')}`) ?? null);
@@ -336,21 +352,6 @@ type RelatedData = {
 
 // Batch-fetch all related entries referenced by relation fields, along with their
 // field definitions and field values. Replaces N×3 individual queries with 3 total.
-async function queryInChunks<T>(
-  db: D1Database,
-  sqlFn: (placeholders: string) => string,
-  ids: string[],
-  chunkSize = 50
-): Promise<T[]> {
-  if (ids.length === 0) return [];
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
-  const results = await Promise.all(
-    chunks.map(chunk => db.prepare(sqlFn(chunk.map(() => '?').join(','))).bind(...chunk).all<T>())
-  );
-  return results.flatMap(r => r.results);
-}
-
 async function buildRelatedData(
   db: D1Database,
   efRows: { field_id: string; value: string | null }[],
