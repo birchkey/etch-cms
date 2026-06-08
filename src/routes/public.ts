@@ -526,6 +526,12 @@ async function hydrateRelatedEntry(
   };
 }
 
+// Datetime values may be stored as JSON ({"datetime":"...","timezone":"..."}) or as a legacy plain ISO string.
+// json_extract on a non-JSON value throws "Malformed JSON" in SQLite/D1, so we guard with json_valid().
+function datetimeEpochSql(col: string): string {
+  return `CASE WHEN json_valid(${col}) THEN strftime('%s', json_extract(${col}, '$.datetime')) ELSE strftime('%s', ${col}) END`;
+}
+
 function buildFilterCondition(alias: string, field: FieldRow, op: string, value: string): { sql: string; bindings: unknown[] } {
   switch (op) {
     case 'empty':
@@ -547,7 +553,7 @@ function buildFilterCondition(alias: string, field: FieldRow, op: string, value:
     case 'lte': {
       const sqlOp = op === 'gt' ? '>' : op === 'gte' ? '>=' : op === 'lt' ? '<' : '<=';
       if (field.type === 'datetime') {
-        return { sql: `strftime('%s', json_extract(${alias}.value, '$.datetime')) ${sqlOp} strftime('%s', ?)`, bindings: [value] };
+        return { sql: `${datetimeEpochSql(`${alias}.value`)} ${sqlOp} strftime('%s', ?)`, bindings: [value] };
       }
       return { sql: `CAST(${alias}.value AS REAL) ${sqlOp} CAST(? AS REAL)`, bindings: [value] };
     }
@@ -632,7 +638,7 @@ publicApi.get('/:typeSlug', async (c) => {
 
   if (hasDateFilter) {
     const op = dateFilter === 'future' ? '>' : '<';
-    whereClause += ` AND strftime('%s', json_extract(ef_date.value, '$.datetime')) ${op} strftime('%s', 'now')`;
+    whereClause += ` AND ${datetimeEpochSql('ef_date.value')} ${op} strftime('%s', 'now')`;
   }
 
   // Parse and apply filter[slug][op]=value params
@@ -664,7 +670,7 @@ publicApi.get('/:typeSlug', async (c) => {
   } else if (sortByField) {
     const alias = sortByField.id === dateFieldRow?.id ? 'ef_date' : 'ef_sort';
     if (sortByField.type === 'datetime') {
-      orderBy = `strftime('%s', json_extract(${alias}.value, '$.datetime')) ${sortDir}`;
+      orderBy = `${datetimeEpochSql(`${alias}.value`)} ${sortDir}`;
     } else if (sortByField.type === 'number') {
       orderBy = `CAST(${alias}.value AS REAL) ${sortDir}`;
     } else {
