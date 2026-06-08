@@ -40,6 +40,7 @@ export default function EntryForm() {
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slugCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSaveRef = useRef<() => void>(() => {});
   const handlePublishRef = useRef<() => void>(() => {});
 
@@ -131,6 +132,18 @@ export default function EntryForm() {
           const suggested = slugify(value);
           setSlug(suggested);
           slugRef.current = suggested;
+
+          if (slugCheckTimer.current) clearTimeout(slugCheckTimer.current);
+          slugCheckTimer.current = setTimeout(async () => {
+            if (!typeId || slugRef.current !== suggested) return;
+            try {
+              const result = await contentTypesApi.slugSuggest(typeId, suggested, isNew ? undefined : entryId);
+              if (slugRef.current === suggested) {
+                setSlug(result.slug);
+                slugRef.current = result.slug;
+              }
+            } catch { /* leave slug as-is if check fails */ }
+          }, 400);
         }
       }
 

@@ -204,6 +204,11 @@ export const contentTypesApi = {
   update: (id: string, data: { name?: string; slug?: string; description?: string; preview_url?: string | null; fields?: FieldInput[] }) =>
     request<ContentType>(`/content-types/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request<{ ok: true }>(`/content-types/${id}`, { method: 'DELETE' }),
+  slugSuggest: (typeId: string, slug: string, exclude?: string) => {
+    const params = new URLSearchParams({ slug });
+    if (exclude) params.set('exclude', exclude);
+    return request<{ slug: string }>(`/content-types/${typeId}/entries/slug-suggest?${params}`);
+  },
   listEntries: (typeId: string, opts?: { status?: string; page?: number; limit?: number; sort_by?: string; sort_dir?: 'asc' | 'desc'; q?: string }) => {
     const params = new URLSearchParams();
     if (opts?.status) params.set('status', opts.status);
