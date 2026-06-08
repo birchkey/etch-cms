@@ -84,12 +84,67 @@ The response is clean, paginated JSON:
 
 Bind the `data` array to a Webstudio Collection component, then map each field to elements via bindings.
 
-**Pagination query params:**
+**Query params:**
 
 | Param | Default | Description |
 |-------|---------|-------------|
 | `limit` | `100` | Items per page (max `1000`, or `all` for up to 10,000) |
 | `page` | `1` | Page number |
+| `sort_by` | `sort_order` | Sort column: `sort_order`, `created_at`, `updated_at`, `published_at`, or any field slug |
+| `sort_dir` | `asc` | Sort direction: `asc` or `desc` |
+| `date_field` | — | Slug of a `datetime` field to filter by date |
+| `date_filter` | — | `future` returns entries where `date_field` is after now; `past` returns entries where it is before now. Requires `date_field`. |
+| `filter[slug]` | — | Filter by field value (equality shorthand). See field filtering below. |
+| `filter[slug][op]` | — | Filter by field value with an explicit operator. See field filtering below. |
+
+When `date_filter` is active and no `sort_by` is given, results are automatically sorted by `date_field` — ascending for `future` (soonest first), descending for `past` (most recent first).
+
+**Date filter examples:**
+
+```
+# Upcoming events, soonest first
+GET /api/public/events?date_field=event_date&date_filter=future
+
+# Past events, most recent first
+GET /api/public/events?date_field=event_date&date_filter=past
+
+# Upcoming events, sorted alphabetically instead
+GET /api/public/events?date_field=event_date&date_filter=future&sort_by=name&sort_dir=asc
+```
+
+**Field filtering:**
+
+Use `filter[slug]=value` for equality, or `filter[slug][op]=value` for other operators. Multiple filters are ANDed together. Unknown field slugs are silently ignored.
+
+| Operator | Description | Applicable field types |
+|----------|-------------|------------------------|
+| `eq` (default) | Equals | All |
+| `not` | Not equal (includes entries where field is empty) | All |
+| `empty` | No value set (null, empty string, or empty array) | All |
+| `notempty` | Has any value | All |
+| `contains` | Value contains substring (case-insensitive) | text, rich_text, email, phone, select |
+| `in` | Value is one of a comma-separated list | text, select |
+| `gt` / `gte` | Greater than / greater than or equal | number, datetime |
+| `lt` / `lte` | Less than / less than or equal | number, datetime |
+
+For `datetime` fields, `gt`/`gte`/`lt`/`lte` values should be ISO 8601 strings (e.g. `2026-01-01T00:00:00Z`).
+
+```
+# Events with no photos uploaded yet
+GET /api/public/events?filter[event_photos][empty]=1
+
+# Upcoming events with no photos (combining date filter + field filter)
+GET /api/public/events?date_field=event_date&date_filter=future&filter[event_photos][empty]=1
+
+# Posts in a specific category
+GET /api/public/posts?filter[category]=news
+
+# Posts in any of several categories
+GET /api/public/posts?filter[category][in]=news,updates,announcements
+
+# Products in a price range
+GET /api/public/products?filter[price][gte]=50&filter[price][lte]=200
+```
 
 ### Fetch a single entry
 

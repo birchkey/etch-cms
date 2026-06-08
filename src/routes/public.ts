@@ -506,6 +506,37 @@ async function hydrateRelatedEntry(
   };
 }
 
+function buildFilterCondition(alias: string, field: FieldRow, op: string, value: string): { sql: string; bindings: unknown[] } {
+  switch (op) {
+    case 'empty':
+      return { sql: `(${alias}.value IS NULL OR ${alias}.value = '' OR ${alias}.value = '[]')`, bindings: [] };
+    case 'notempty':
+      return { sql: `(${alias}.value IS NOT NULL AND ${alias}.value != '' AND ${alias}.value != '[]')`, bindings: [] };
+    case 'contains':
+      return { sql: `${alias}.value LIKE ?`, bindings: [`%${value}%`] };
+    case 'not':
+      return { sql: `(${alias}.value != ? OR ${alias}.value IS NULL)`, bindings: [value] };
+    case 'in': {
+      const vals = value.split(',').map(v => v.trim()).filter(Boolean);
+      if (vals.length === 0) return { sql: '1=0', bindings: [] };
+      return { sql: `${alias}.value IN (${vals.map(() => '?').join(',')})`, bindings: vals };
+    }
+    case 'gt':
+    case 'gte':
+    case 'lt':
+    case 'lte': {
+      const sqlOp = op === 'gt' ? '>' : op === 'gte' ? '>=' : op === 'lt' ? '<' : '<=';
+      if (field.type === 'datetime') {
+        return { sql: `strftime('%s', json_extract(${alias}.value, '$.datetime')) ${sqlOp} strftime('%s', ?)`, bindings: [value] };
+      }
+      return { sql: `CAST(${alias}.value AS REAL) ${sqlOp} CAST(? AS REAL)`, bindings: [value] };
+    }
+    case 'eq':
+    default:
+      return { sql: `${alias}.value = ?`, bindings: [value] };
+  }
+}
+
 // GET /api/public/:typeSlug
 publicApi.get('/:typeSlug', async (c) => {
   const { typeSlug } = c.req.param();
@@ -562,14 +593,17 @@ publicApi.get('/:typeSlug', async (c) => {
   // Build JOIN clauses (entry_fields joined by field ID, already resolved above)
   let joins = '';
   const joinBindings: unknown[] = [];
+  const joinedFieldIds = new Map<string, string>(); // fieldId → alias
 
   if (hasDateFilter) {
     joins += ' JOIN entry_fields ef_date ON ef_date.entry_id = e.id AND ef_date.field_id = ?';
     joinBindings.push(dateFieldRow!.id);
+    joinedFieldIds.set(dateFieldRow!.id, 'ef_date');
   }
   if (sortByField && sortByField.id !== dateFieldRow?.id) {
     joins += ' LEFT JOIN entry_fields ef_sort ON ef_sort.entry_id = e.id AND ef_sort.field_id = ?';
     joinBindings.push(sortByField.id);
+    joinedFieldIds.set(sortByField.id, 'ef_sort');
   }
 
   // Build WHERE clause
@@ -579,6 +613,28 @@ publicApi.get('/:typeSlug', async (c) => {
   if (hasDateFilter) {
     const op = dateFilter === 'future' ? '>' : '<';
     whereClause += ` AND strftime('%s', json_extract(ef_date.value, '$.datetime')) ${op} strftime('%s', 'now')`;
+  }
+
+  // Parse and apply filter[slug][op]=value params
+  let filterJoinIndex = 0;
+  for (const [key, value] of new URL(c.req.url).searchParams.entries()) {
+    const m = key.match(/^filter\[([^\]]+)\](?:\[([^\]]+)\])?$/);
+    if (!m) continue;
+    const filterField = fieldsBySlug.get(m[1]);
+    if (!filterField) continue;
+    const op = m[2] ?? 'eq';
+
+    let alias = joinedFieldIds.get(filterField.id);
+    if (!alias) {
+      alias = `ef_f${filterJoinIndex++}`;
+      joinedFieldIds.set(filterField.id, alias);
+      joins += ` LEFT JOIN entry_fields ${alias} ON ${alias}.entry_id = e.id AND ${alias}.field_id = ?`;
+      joinBindings.push(filterField.id);
+    }
+
+    const { sql, bindings } = buildFilterCondition(alias, filterField, op, value);
+    whereClause += ` AND ${sql}`;
+    whereBindings.push(...bindings);
   }
 
   // Build ORDER BY clause
