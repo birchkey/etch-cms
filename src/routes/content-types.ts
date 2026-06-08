@@ -468,6 +468,27 @@ contentTypes.patch('/:typeId/entries/reorder', async (c) => {
   return c.json({ ok: true });
 });
 
+// GET /api/content-types/:typeId/entries/slug-suggest
+contentTypes.get('/:typeId/entries/slug-suggest', async (c) => {
+  const { typeId } = c.req.param();
+  const base = c.req.query('slug')?.trim() ?? '';
+  const exclude = c.req.query('exclude')?.trim() ?? '';
+  if (!base) return c.json({ error: 'slug param required' }, 400);
+
+  for (let i = 0; i <= 99; i++) {
+    const candidate = i === 0 ? base : `${base}-${i}`;
+    const sql = exclude
+      ? 'SELECT id FROM entries WHERE content_type_id = ? AND slug = ? AND id != ?'
+      : 'SELECT id FROM entries WHERE content_type_id = ? AND slug = ?';
+    const row = await c.env.DB.prepare(sql)
+      .bind(...(exclude ? [typeId, candidate, exclude] : [typeId, candidate]))
+      .first<{ id: string }>();
+    if (!row) return c.json({ slug: candidate });
+  }
+
+  return c.json({ slug: `${base}-${Date.now()}` });
+});
+
 // GET /api/content-types/:typeId/entries
 contentTypes.get('/:typeId/entries', async (c) => {
   const { typeId } = c.req.param();

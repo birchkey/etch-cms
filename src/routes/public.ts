@@ -336,6 +336,21 @@ type RelatedData = {
 
 // Batch-fetch all related entries referenced by relation fields, along with their
 // field definitions and field values. Replaces N×3 individual queries with 3 total.
+async function queryInChunks<T>(
+  db: D1Database,
+  sqlFn: (placeholders: string) => string,
+  ids: string[],
+  chunkSize = 50
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
+  const results = await Promise.all(
+    chunks.map(chunk => db.prepare(sqlFn(chunk.map(() => '?').join(','))).bind(...chunk).all<T>())
+  );
+  return results.flatMap(r => r.results);
+}
+
 async function buildRelatedData(
   db: D1Database,
   efRows: { field_id: string; value: string | null }[],
@@ -354,36 +369,40 @@ async function buildRelatedData(
   }
 
   const idList = [...relatedIds];
-  const placeholders = idList.map(() => '?').join(',');
 
-  const relEntries = await db.prepare(
-    `SELECT * FROM entries WHERE id IN (${placeholders}) AND status = 'published'`
-  ).bind(...idList).all<EntryRow>();
+  const relEntries = await queryInChunks<EntryRow>(
+    db,
+    p => `SELECT * FROM entries WHERE id IN (${p}) AND status = 'published'`,
+    idList
+  );
 
-  const ctIds = [...new Set(relEntries.results.map(e => e.content_type_id))];
+  const ctIds = [...new Set(relEntries.map(e => e.content_type_id))];
   const fieldsByType = new Map<string, FieldRow[]>();
   if (ctIds.length > 0) {
-    const ctPlaceholders = ctIds.map(() => '?').join(',');
-    const relFields = await db.prepare(
-      `SELECT * FROM fields WHERE content_type_id IN (${ctPlaceholders}) ORDER BY sort_order`
-    ).bind(...ctIds).all<FieldRow>();
+    const relFields = await queryInChunks<FieldRow>(
+      db,
+      p => `SELECT * FROM fields WHERE content_type_id IN (${p}) ORDER BY sort_order`,
+      ctIds
+    );
     for (const ctId of ctIds) {
-      fieldsByType.set(ctId, relFields.results.filter(f => f.content_type_id === ctId));
+      fieldsByType.set(ctId, relFields.filter(f => f.content_type_id === ctId));
     }
   }
 
   const relEfByEntry = new Map<string, { field_id: string; value: string | null }[]>();
-  const relEfResult = await db.prepare(
-    `SELECT * FROM entry_fields WHERE entry_id IN (${placeholders})`
-  ).bind(...idList).all<{ entry_id: string; field_id: string; value: string | null }>();
-  for (const ef of relEfResult.results) {
+  const relEfRows = await queryInChunks<{ entry_id: string; field_id: string; value: string | null }>(
+    db,
+    p => `SELECT * FROM entry_fields WHERE entry_id IN (${p})`,
+    idList
+  );
+  for (const ef of relEfRows) {
     let arr = relEfByEntry.get(ef.entry_id);
     if (!arr) { arr = []; relEfByEntry.set(ef.entry_id, arr); }
     arr.push(ef);
   }
 
   return {
-    entries: new Map(relEntries.results.map(e => [e.id, e])),
+    entries: new Map(relEntries.map(e => [e.id, e])),
     fieldsByType,
     efRows: relEfByEntry,
   };
@@ -665,16 +684,13 @@ publicApi.get('/:typeSlug', async (c) => {
     `SELECT e.* FROM entries e${joins} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`
   ).bind(...baseBindings, limit, offset).all<EntryRow>();
 
-  // Batch-fetch all entry_fields for this page in one query (avoids N+1)
+  // Batch-fetch all entry_fields for this page, chunked to stay under D1's bound-variable limit
   const entryIds = entriesResult.results.map(e => e.id);
-  let allEfRows: { entry_id: string; field_id: string; value: string | null }[] = [];
-  if (entryIds.length > 0) {
-    const placeholders = entryIds.map(() => '?').join(',');
-    const efResult = await c.env.DB.prepare(
-      `SELECT * FROM entry_fields WHERE entry_id IN (${placeholders})`
-    ).bind(...entryIds).all<{ entry_id: string; field_id: string; value: string | null }>();
-    allEfRows = efResult.results;
-  }
+  const allEfRows = await queryInChunks<{ entry_id: string; field_id: string; value: string | null }>(
+    c.env.DB,
+    p => `SELECT * FROM entry_fields WHERE entry_id IN (${p})`,
+    entryIds
+  );
   const efByEntry = new Map<string, { entry_id: string; field_id: string; value: string | null }[]>();
   for (const ef of allEfRows) {
     let arr = efByEntry.get(ef.entry_id);
