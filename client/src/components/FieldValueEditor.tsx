@@ -722,10 +722,9 @@ function MultiImageEditor({ value, onChange }: { value: string[] | null; onChang
       <AssetPicker
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onSelect={(url) => {
-          onChange([...images, url]);
-          setPickerOpen(false);
-        }}
+        onSelect={(url) => { onChange([...images, url]); setPickerOpen(false); }}
+        multiSelect
+        onSelectMultiple={(urls) => { onChange([...images, ...urls]); setPickerOpen(false); }}
       />
     </div>
   );
