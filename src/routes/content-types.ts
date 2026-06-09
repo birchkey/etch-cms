@@ -50,8 +50,6 @@ contentTypes.use('*', authMiddleware);
 contentTypes.on('POST', '/', adminOnly);
 contentTypes.on('PUT', '/:id', adminOnly);
 contentTypes.on('DELETE', '/:id', adminOnly);
-contentTypes.on('PATCH', '/:typeId/entries/reorder', adminOnly);
-
 // GET /api/content-types
 contentTypes.get('/', async (c) => {
   const permitted = await getPermittedContentTypeIds(c.env.DB, c.get('jwtPayload') as JWTPayload);
@@ -455,6 +453,8 @@ contentTypes.get('/:typeId/entries/export', async (c) => {
 // PATCH /api/content-types/:typeId/entries/reorder
 contentTypes.patch('/:typeId/entries/reorder', async (c) => {
   const { typeId } = c.req.param();
+  const permitted = await getPermittedContentTypeIds(c.env.DB, c.get('jwtPayload') as JWTPayload);
+  if (!isPermitted(permitted, typeId)) return c.json({ error: 'Forbidden' }, 403);
   const raw = await c.req.json().catch(() => null);
   const reorderParsed = parseBody(ReorderSchema, raw);
   if (!reorderParsed.ok) return c.json({ error: reorderParsed.error }, 400);

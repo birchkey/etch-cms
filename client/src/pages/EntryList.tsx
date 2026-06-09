@@ -314,12 +314,10 @@ export default function EntryList() {
               <Button variant="outline" size="sm">Edit Collection</Button>
             </Link>
           )}
-          {isAdmin && (
-            <Button variant="outline" size="sm" onClick={enterReorderMode}>
-              <GripVertical className="h-4 w-4 mr-2" />
-              Reorder
-            </Button>
-          )}
+          <Button variant="outline" size="sm" onClick={enterReorderMode}>
+            <GripVertical className="h-4 w-4 mr-2" />
+            Reorder
+          </Button>
           <div className="relative">
             <Button variant="outline" size="sm" onClick={() => setExportOpen(o => !o)}>
               <Download className="h-4 w-4 mr-2" />
