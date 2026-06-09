@@ -17,7 +17,7 @@ function formatDatetime(rawValue: string): Record<string, unknown> | null {
     const parsed = JSON.parse(rawValue) as { datetime?: string; timezone?: string };
     if (parsed && typeof parsed === 'object' && 'datetime' in parsed) {
       datetimeStr = parsed.datetime ?? '';
-      timezone = parsed.timezone ?? null;
+      timezone = parsed.timezone || null;
     } else {
       datetimeStr = rawValue;
     }

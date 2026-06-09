@@ -40,6 +40,17 @@
   }
 }
 
+/* Push date/time picker icons to the right edge */
+input[type="date"],
+input[type="time"] {
+  display: inline-block;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  margin-left: auto;
+  cursor: pointer;
+}
+
 /* Tiptap editor styles */
 .tiptap {
   outline: none;

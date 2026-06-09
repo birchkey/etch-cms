@@ -94,6 +94,92 @@ function parseDatetimeValue(value: unknown): { datetime: string; timezone: strin
   return { datetime: '', timezone: defaultTz };
 }
 
+function TimezoneSelect({ value, onChange }: { value: string; onChange: (tz: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return ALL_TIMEZONES as string[];
+    const q = search.toLowerCase();
+    return (ALL_TIMEZONES as string[]).filter(tz => tz.toLowerCase().includes(q));
+  }, [search]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const select = (tz: string) => {
+    onChange(tz);
+    setOpen(false);
+    setSearch('');
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => { setSearch(''); setOpen(v => !v); }}
+        className="flex items-center h-9 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm hover:border-zinc-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+      >
+        {value
+          ? <span className="flex-1 text-left font-mono text-sm truncate">{value}</span>
+          : <span className="flex-1 text-left text-zinc-400">e.g. America/Chicago</span>}
+        {value && (
+          <span
+            role="button"
+            onClick={e => { e.stopPropagation(); onChange(''); }}
+            className="text-zinc-300 hover:text-zinc-500 transition-colors mr-1"
+          >
+            <X className="h-3.5 w-3.5" />
+          </span>
+        )}
+        <ChevronDown className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 top-full left-0 mt-1 w-full bg-white border border-zinc-200 rounded-lg shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-zinc-100">
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search timezones…"
+              className="w-full px-2 py-1.5 text-sm font-mono rounded border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {filtered.length === 0
+              ? <p className="p-3 text-sm text-zinc-400">No timezones found</p>
+              : filtered.map(tz => (
+                <button
+                  key={tz}
+                  type="button"
+                  onClick={() => select(tz)}
+                  className={cn(
+                    'w-full text-left px-3 py-2 text-sm font-mono hover:bg-zinc-50 transition-colors',
+                    tz === value && 'bg-indigo-50 text-indigo-600'
+                  )}
+                >
+                  {tz}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IconPicker({ value, onChange }: { value: string; onChange: (v: unknown) => void }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -291,28 +377,40 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
 
     case 'datetime': {
       const dtParsed = parseDatetimeValue(value);
-      const tzListId = `tz-${field.id}`;
+      const tIdx = dtParsed.datetime.indexOf('T');
+      const datePart = tIdx >= 0 ? dtParsed.datetime.slice(0, tIdx) : dtParsed.datetime;
+      const timePart = tIdx >= 0 ? dtParsed.datetime.slice(tIdx + 1, tIdx + 6) : '';
+      const handleDateChange = (newDate: string) => {
+        if (!newDate) { onChange({ datetime: '', timezone: dtParsed.timezone }); return; }
+        onChange({ datetime: `${newDate}T${timePart || '00:00'}`, timezone: dtParsed.timezone });
+      };
+      const handleTimeChange = (newTime: string) => {
+        if (!datePart) return;
+        onChange({ datetime: `${datePart}T${newTime || '00:00'}`, timezone: dtParsed.timezone });
+      };
+
       return (
         <div className="space-y-2">
-          <Input
-            type="datetime-local"
-            value={dtParsed.datetime}
-            onChange={e => onChange({ datetime: e.target.value, timezone: dtParsed.timezone })}
-          />
+          <div className="flex gap-2">
+            <Input
+              type="date"
+              value={datePart}
+              onChange={e => handleDateChange(e.target.value)}
+              className="flex-1"
+            />
+            <Input
+              type="time"
+              value={timePart}
+              onChange={e => handleTimeChange(e.target.value)}
+              className="flex-1"
+            />
+          </div>
           <div className="space-y-1">
             <Label className="text-xs text-zinc-500">Time zone</Label>
-            <Input
-              list={tzListId}
+            <TimezoneSelect
               value={dtParsed.timezone}
-              onChange={e => onChange({ datetime: dtParsed.datetime, timezone: e.target.value })}
-              placeholder="e.g. America/Chicago"
-              className="font-mono text-sm"
+              onChange={tz => onChange({ datetime: dtParsed.datetime, timezone: tz })}
             />
-            <datalist id={tzListId}>
-              {ALL_TIMEZONES.map(tz => (
-                <option key={tz} value={tz} />
-              ))}
-            </datalist>
           </div>
         </div>
       );
