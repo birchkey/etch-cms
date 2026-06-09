@@ -7,6 +7,7 @@ interface StoredUser {
   username: string;
   name: string | null;
   role: Role;
+  mustResetPassword: boolean;
 }
 
 interface AuthContextValue {
@@ -14,8 +15,10 @@ interface AuthContextValue {
   name: string | null;
   displayName: string | null;
   role: Role | null;
+  mustResetPassword: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  clearMustResetPassword: () => void;
   isAuthenticated: boolean;
   isAdmin: boolean;
 }
@@ -38,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const res = await authApi.login(username, password);
-    const stored: StoredUser = { username: res.username, name: res.name, role: res.role };
+    const stored: StoredUser = { username: res.username, name: res.name, role: res.role, mustResetPassword: res.must_reset_password ?? false };
     localStorage.setItem(USER_KEY, JSON.stringify(stored));
     setUser(stored);
   }, []);
@@ -49,6 +52,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const clearMustResetPassword = useCallback(() => {
+    setUser(prev => {
+      if (!prev) return null;
+      const updated = { ...prev, mustResetPassword: false };
+      localStorage.setItem(USER_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   const displayName = user?.name || user?.username || null;
 
   return (
@@ -57,8 +69,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: user?.name ?? null,
       displayName,
       role: user?.role ?? null,
+      mustResetPassword: user?.mustResetPassword ?? false,
       login,
       logout,
+      clearMustResetPassword,
       isAuthenticated: !!user,
       isAdmin: user?.role === 'admin',
     }}>

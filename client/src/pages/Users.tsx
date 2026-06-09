@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Plus, Trash2, KeyRound, Loader2, Users as UsersIcon, Pencil, Shield } from 'lucide-react';
+import { Plus, Trash2, KeyRound, Loader2, Users as UsersIcon, Pencil, Shield, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePageTitle } from '@/lib/settings';
 
@@ -20,6 +20,7 @@ export default function Users() {
   const [editNameTarget, setEditNameTarget] = useState<CmsUser | null>(null);
   const [permissionsTarget, setPermissionsTarget] = useState<CmsUser | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [clearingReset, setClearingReset] = useState<string | null>(null);
 
   useEffect(() => {
     usersApi.list()
@@ -27,6 +28,19 @@ export default function Users() {
       .catch(() => toast.error('Failed to load users'))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleClearReset = async (user: CmsUser) => {
+    setClearingReset(user.id);
+    try {
+      const updated = await usersApi.setMustReset(user.id, false);
+      setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+      toast.success('Reset flag cleared');
+    } catch {
+      toast.error('Failed to clear flag');
+    } finally {
+      setClearingReset(null);
+    }
+  };
 
   const handleDelete = async (user: CmsUser) => {
     if (!confirm(`Remove "${user.username}"? They will lose access immediately.`)) return;
@@ -79,17 +93,15 @@ export default function Users() {
                   {initial}
                 </div>
                 <div className="flex-1 min-w-0">
-                  {user.name ? (
-                    <>
-                      <p className="font-medium text-zinc-900 text-sm">{user.name}</p>
-                      <p className="text-xs text-zinc-400">{user.username} · Editor · Added {new Date(user.created_at).toLocaleDateString()}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="font-medium text-zinc-900 text-sm">{user.username}</p>
-                      <p className="text-xs text-zinc-400">Editor · Added {new Date(user.created_at).toLocaleDateString()}</p>
-                    </>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-zinc-900 text-sm">{user.name || user.username}</p>
+                    {user.must_reset_password === 1 && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">Reset required</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-400">
+                    {user.name ? `${user.username} · ` : ''}Editor · Added {new Date(user.created_at).toLocaleDateString()}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                   <Button
@@ -116,6 +128,19 @@ export default function Users() {
                   >
                     <KeyRound className="h-4 w-4 text-zinc-500" />
                   </Button>
+                  {user.must_reset_password === 1 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Clear password reset requirement"
+                      disabled={clearingReset === user.id}
+                      onClick={() => handleClearReset(user)}
+                    >
+                      {clearingReset === user.id
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <RotateCcw className="h-4 w-4 text-amber-500" />}
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -156,6 +181,7 @@ export default function Users() {
       <ResetPasswordDialog
         user={resetTarget}
         onClose={() => setResetTarget(null)}
+        onReset={updated => setUsers(prev => prev.map(u => u.id === updated.id ? updated : u))}
       />
 
       <PermissionsDialog
@@ -414,7 +440,7 @@ function PermissionsDialog({ user, onClose }: { user: CmsUser | null; onClose: (
   );
 }
 
-function ResetPasswordDialog({ user, onClose }: { user: CmsUser | null; onClose: () => void }) {
+function ResetPasswordDialog({ user, onClose, onReset }: { user: CmsUser | null; onClose: () => void; onReset?: (updated: CmsUser) => void }) {
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -424,7 +450,8 @@ function ResetPasswordDialog({ user, onClose }: { user: CmsUser | null; onClose:
     setSaving(true);
     try {
       await usersApi.resetPassword(user.id, password);
-      toast.success('Password updated');
+      toast.success('Password updated — user will be required to reset on next login');
+      onReset?.({ ...user, must_reset_password: 1 });
       setPassword('');
       onClose();
     } catch (err) {

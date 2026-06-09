@@ -10,7 +10,10 @@ const CreateUserSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
   name: z.string().optional(),
 });
-const UpdateNameSchema = z.object({ name: z.string() });
+const UpdateUserSchema = z.object({
+  name: z.string().optional(),
+  must_reset_password: z.boolean().optional(),
+});
 const ResetPasswordSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
@@ -26,7 +29,7 @@ users.use('*', adminOnly);
 // GET /api/users
 users.get('/', async (c) => {
   const { results } = await c.env.DB.prepare(
-    'SELECT id, username, name, role, created_at, updated_at FROM users ORDER BY created_at DESC'
+    'SELECT id, username, name, role, must_reset_password, created_at, updated_at FROM users ORDER BY created_at DESC'
   ).all<Omit<UserRow, 'password_hash'>>();
   return c.json(results);
 });
@@ -49,35 +52,40 @@ users.post('/', async (c) => {
   const name = body.name?.trim() ?? '';
 
   await c.env.DB.prepare(
-    'INSERT INTO users (id, username, name, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO users (id, username, name, password_hash, role, must_reset_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
   ).bind(id, body.username.trim(), name, passwordHash, 'editor', now, now).run();
 
   const user = await c.env.DB.prepare(
-    'SELECT id, username, name, role, created_at, updated_at FROM users WHERE id = ?'
+    'SELECT id, username, name, role, must_reset_password, created_at, updated_at FROM users WHERE id = ?'
   ).bind(id).first<Omit<UserRow, 'password_hash'>>();
 
   void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.create', 'user', id, body.username.trim()).catch(() => {});
   return c.json(user, 201);
 });
 
-// PATCH /api/users/:id — update name
+// PATCH /api/users/:id — update name and/or must_reset_password flag
 users.patch('/:id', async (c) => {
   const { id } = c.req.param();
   const user = await c.env.DB.prepare('SELECT id, username FROM users WHERE id = ?').bind(id).first<{ id: string; username: string }>();
   if (!user) return c.json({ error: 'Not found' }, 404);
 
   const raw = await c.req.json().catch(() => null);
-  const parsed = parseBody(UpdateNameSchema, raw);
+  const parsed = parseBody(UpdateUserSchema, raw);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const name = parsed.data.name.trim();
-  await c.env.DB.prepare(
-    'UPDATE users SET name = ?, updated_at = ? WHERE id = ?'
-  ).bind(name, Date.now(), id).run();
+
+  const updates: string[] = [];
+  const bindings: unknown[] = [];
+  if (parsed.data.name !== undefined) { updates.push('name = ?'); bindings.push(parsed.data.name.trim()); }
+  if (parsed.data.must_reset_password !== undefined) { updates.push('must_reset_password = ?'); bindings.push(parsed.data.must_reset_password ? 1 : 0); }
+  if (updates.length === 0) return c.json({ error: 'Nothing to update' }, 400);
+  updates.push('updated_at = ?'); bindings.push(Date.now()); bindings.push(id);
+
+  await c.env.DB.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).bind(...bindings).run();
 
   const updated = await c.env.DB.prepare(
-    'SELECT id, username, name, role, created_at, updated_at FROM users WHERE id = ?'
+    'SELECT id, username, name, role, must_reset_password, created_at, updated_at FROM users WHERE id = ?'
   ).bind(id).first<Omit<UserRow, 'password_hash'>>();
-  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.update', 'user', id, user.username, { name }).catch(() => {});
+  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.update', 'user', id, user.username, parsed.data).catch(() => {});
   return c.json(updated);
 });
 
@@ -94,7 +102,7 @@ users.patch('/:id/password', async (c) => {
   const passwordHash = await hashPassword(pwParsed.data.password);
   const now = Date.now();
   await c.env.DB.prepare(
-    'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
+    'UPDATE users SET password_hash = ?, must_reset_password = 1, updated_at = ? WHERE id = ?'
   ).bind(passwordHash, now, id).run();
 
   // Revoke all active sessions — forces re-login on all devices

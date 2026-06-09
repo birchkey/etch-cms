@@ -102,6 +102,7 @@ export interface UserRow {
   name: string;
   password_hash: string;
   role: 'editor';
+  must_reset_password: number; // 0 or 1
   created_at: number;
   updated_at: number;
 }

@@ -86,7 +86,7 @@ export interface PaginatedResponse<T> {
 // Auth
 export const authApi = {
   login: (username: string, password: string) =>
-    request<{ role: 'admin' | 'editor'; username: string; name: string | null }>('/auth/login', {
+    request<{ role: 'admin' | 'editor'; username: string; name: string | null; must_reset_password?: boolean }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
@@ -97,6 +97,11 @@ export const authApi = {
       method: 'PATCH',
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
+  forceChangePassword: (newPassword: string) =>
+    request<{ ok: true }>('/auth/password', {
+      method: 'PATCH',
+      body: JSON.stringify({ newPassword }),
+    }),
 };
 
 // Users (admin only)
@@ -105,6 +110,7 @@ export interface CmsUser {
   username: string;
   name: string;
   role: 'editor';
+  must_reset_password: number;
   created_at: number;
   updated_at: number;
 }
@@ -115,6 +121,8 @@ export const usersApi = {
     request<CmsUser>('/users', { method: 'POST', body: JSON.stringify({ username, password, name }) }),
   updateName: (id: string, name: string) =>
     request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  setMustReset: (id: string, mustReset: boolean) =>
+    request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ must_reset_password: mustReset }) }),
   resetPassword: (id: string, password: string) =>
     request<{ ok: true }>(`/users/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password }) }),
   delete: (id: string) => request<{ ok: true }>(`/users/${id}`, { method: 'DELETE' }),

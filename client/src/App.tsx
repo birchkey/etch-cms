@@ -13,11 +13,13 @@ import Users from '@/pages/Users';
 import Settings from '@/pages/Settings';
 import Webhooks from '@/pages/Webhooks';
 import AuditLog from '@/pages/AuditLog';
+import ForceResetPassword from '@/pages/ForceResetPassword';
 import { Toaster } from 'sonner';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, mustResetPassword } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (mustResetPassword) return <ForceResetPassword />;
   return <>{children}</>;
 }
 

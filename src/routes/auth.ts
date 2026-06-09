@@ -29,7 +29,7 @@ const LoginSchema = z.object({
   password: z.string().min(1, 'Password required'),
 });
 const ChangePasswordSchema = z.object({
-  currentPassword: z.string().min(1, 'currentPassword required'),
+  currentPassword: z.string().optional(),
   newPassword: z.string().min(8, 'New password must be at least 8 characters'),
 });
 
@@ -119,7 +119,7 @@ auth.post('/login', async (c) => {
 
   const { token, refreshToken } = await createTokens(c.env.DB, c.env.JWT_SECRET, user.username, user.role, user.name || undefined);
   setAuthCookies(c, token, refreshToken);
-  return c.json({ role: user.role, username: user.username, name: user.name || null });
+  return c.json({ role: user.role, username: user.username, name: user.name || null, must_reset_password: user.must_reset_password === 1 });
 });
 
 auth.post('/refresh', async (c) => {
@@ -186,12 +186,15 @@ auth.patch('/password', authMiddleware, async (c) => {
   ).bind(payload.sub).first<UserRow>();
   if (!user) return c.json({ error: 'User not found' }, 404);
 
-  const valid = await verifyPassword(body.currentPassword, user.password_hash);
-  if (!valid) return c.json({ error: 'Current password is incorrect' }, 400);
+  if (user.must_reset_password !== 1) {
+    if (!body.currentPassword) return c.json({ error: 'currentPassword required' }, 400);
+    const valid = await verifyPassword(body.currentPassword, user.password_hash);
+    if (!valid) return c.json({ error: 'Current password is incorrect' }, 400);
+  }
 
   const newHash = await hashPassword(body.newPassword);
   await c.env.DB.prepare(
-    'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
+    'UPDATE users SET password_hash = ?, must_reset_password = 0, updated_at = ? WHERE id = ?'
   ).bind(newHash, Date.now(), user.id).run();
 
   // Revoke all refresh tokens for this user — forces re-login on all devices
