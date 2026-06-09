@@ -205,11 +205,13 @@ export default function Settings() {
   const [siteName, setSiteName] = useState(settings.site_name);
   const [logoType, setLogoType] = useState<'text' | 'image'>(settings.logo_type);
   const [logoImageUrl, setLogoImageUrl] = useState(settings.logo_image_url);
+  const [loginLogoImageUrl, setLoginLogoImageUrl] = useState(settings.login_logo_image_url);
   const [faviconUrl, setFaviconUrl] = useState(settings.favicon_url);
   const [accentColor, setAccentColor] = useState(settings.accent_color);
   const [hexInput, setHexInput] = useState(settings.accent_color);
   const [uploadLimitMb, setUploadLimitMb] = useState(settings.upload_limit_mb);
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+  const [loginLogoPickerOpen, setLoginLogoPickerOpen] = useState(false);
   const [faviconPickerOpen, setFaviconPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
@@ -219,6 +221,7 @@ export default function Settings() {
     setSiteName(settings.site_name);
     setLogoType(settings.logo_type);
     setLogoImageUrl(settings.logo_image_url);
+    setLoginLogoImageUrl(settings.login_logo_image_url);
     setFaviconUrl(settings.favicon_url);
     setAccentColor(settings.accent_color);
     setHexInput(settings.accent_color);
@@ -232,6 +235,7 @@ export default function Settings() {
         site_name: siteName,
         logo_type: logoType,
         logo_image_url: logoImageUrl,
+        login_logo_image_url: loginLogoImageUrl,
         favicon_url: faviconUrl,
         accent_color: accentColor,
         upload_limit_mb: uploadLimitMb,
@@ -246,9 +250,13 @@ export default function Settings() {
   };
 
   const handleLogoAssetSelect = (_url: string, asset: Asset) => {
-    // Store the full URL for display; it's also what gets saved
     setLogoImageUrl(`/r2/${asset.filename}`);
     setAssetPickerOpen(false);
+  };
+
+  const handleLoginLogoAssetSelect = (_url: string, asset: Asset) => {
+    setLoginLogoImageUrl(`/r2/${asset.filename}`);
+    setLoginLogoPickerOpen(false);
   };
 
   return (
@@ -280,7 +288,7 @@ export default function Settings() {
           </div>
 
           <div className="space-y-2">
-            <Label>Logo</Label>
+            <Label>Sidebar logo</Label>
             <div className="flex gap-3">
               <button
                 type="button"
@@ -353,6 +361,49 @@ export default function Settings() {
                 </p>
               </div>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Login page logo</Label>
+            {loginLogoImageUrl ? (
+              <div className="flex items-center gap-3 p-3 bg-zinc-50 rounded-lg border border-zinc-200">
+                <img
+                  src={loginLogoImageUrl}
+                  alt="Login logo"
+                  className="h-8 w-auto max-w-40 object-contain"
+                />
+                <div className="flex gap-2 ml-auto">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setLoginLogoPickerOpen(true)}
+                  >
+                    Change
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setLoginLogoImageUrl('')}
+                  >
+                    <X className="h-4 w-4 text-zinc-400" />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setLoginLogoPickerOpen(true)}
+                className="w-full flex flex-col items-center gap-2 p-6 border-2 border-dashed border-zinc-200 rounded-lg text-zinc-400 hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors"
+              >
+                <ImageIcon className="h-7 w-7" />
+                <span className="text-sm">Click to select login page logo</span>
+              </button>
+            )}
+            <p className="text-xs text-zinc-400">
+              Shown on the login page. Falls back to the sidebar logo if not set.
+            </p>
           </div>
 
           {/* Favicon */}
@@ -754,6 +805,11 @@ export default function Settings() {
         open={assetPickerOpen}
         onClose={() => setAssetPickerOpen(false)}
         onSelect={handleLogoAssetSelect}
+      />
+      <AssetPicker
+        open={loginLogoPickerOpen}
+        onClose={() => setLoginLogoPickerOpen(false)}
+        onSelect={handleLoginLogoAssetSelect}
       />
       <AssetPicker
         open={faviconPickerOpen}

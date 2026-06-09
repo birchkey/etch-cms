@@ -35,9 +35,9 @@ export default function Login() {
     <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          {settings.logo_type === 'image' && settings.logo_image_url ? (
+          {(settings.login_logo_image_url || (settings.logo_type === 'image' && settings.logo_image_url)) ? (
             <img
-              src={settings.logo_image_url}
+              src={settings.login_logo_image_url || settings.logo_image_url}
               alt={settings.site_name}
               className="h-12 w-auto max-w-50 object-contain mx-auto mb-4"
             />

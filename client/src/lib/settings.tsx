@@ -6,6 +6,7 @@ export interface SiteSettings {
   site_name: string;
   logo_type: 'text' | 'image';
   logo_image_url: string;
+  login_logo_image_url: string;
   accent_color: string;
   favicon_url: string;
   upload_limit_mb: string;
@@ -15,6 +16,7 @@ const DEFAULTS: SiteSettings = {
   site_name: 'Etch CMS',
   logo_type: 'text',
   logo_image_url: '',
+  login_logo_image_url: '',
   accent_color: '#4f46e5',
   favicon_url: '',
   upload_limit_mb: '50',
