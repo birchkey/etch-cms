@@ -5,8 +5,9 @@ import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Input } from '@/components/ui/input';
-import { Plus, Loader2, FileText, Trash2, Pencil, Globe, EyeOff, Search, Copy, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Download, GripVertical } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, Loader2, FileText, Trash2, Pencil, Globe, EyeOff, Search, Copy, ChevronLeft, ChevronRight, X, ArrowUp, ArrowDown, Download, GripVertical, MoreHorizontal } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { usePageTitle } from '@/lib/settings';
 import {
@@ -19,6 +20,28 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 const PAGE_SIZE = 50;
+
+const DISPLAYABLE_TYPES = new Set(['text', 'number', 'datetime', 'boolean', 'select', 'email', 'phone', 'color', 'icon', 'rich_text']);
+const SORTABLE_TYPES = new Set(['text', 'number', 'datetime', 'boolean', 'select', 'email', 'phone']);
+
+function formatFieldValue(value: unknown, type: string): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (type === 'boolean') return value ? 'Yes' : 'No';
+  if (type === 'datetime') {
+    const raw = typeof value === 'object' && value !== null && 'datetime' in (value as Record<string, unknown>)
+      ? (value as { datetime: string }).datetime
+      : String(value);
+    try { return new Date(raw).toLocaleDateString(); } catch { return raw; }
+  }
+  if (type === 'select') {
+    if (Array.isArray(value)) return value.join(', ');
+  }
+  if (type === 'rich_text' && typeof value === 'string') {
+    return value.replace(/<[^>]+>/g, '').slice(0, 60) || '—';
+  }
+  if (typeof value === 'string') return value.slice(0, 60) || '—';
+  return String(value);
+}
 
 function SortableEntryRow({ entry, label }: { entry: Entry; label: string }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id });
@@ -68,6 +91,7 @@ export default function EntryList() {
   const statusFilter = searchParams.get('status') ?? '';
   const sortBy = searchParams.get('sort_by') ?? 'sort_order';
   const sortDir = (searchParams.get('sort_dir') ?? 'asc') as 'asc' | 'desc';
+  const extraCol = searchParams.get('extra_col');
 
   // Merge a single param change, preserving all others. Omit defaults to keep URLs clean.
   const setParam = (key: string, val: string | null) => {
@@ -270,13 +294,18 @@ export default function EntryList() {
     return `Entry ${entry.id.slice(0, 8)}`;
   };
 
+  const allFields = contentType?.fields ?? [];
+  const displayableFields = allFields.filter(f => DISPLAYABLE_TYPES.has(f.type));
+  const sortableFields = allFields.filter(f => SORTABLE_TYPES.has(f.type));
+  const extraColField = extraCol ? allFields.find(f => f.slug === extraCol) : undefined;
+
   if (loading) {
     return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-zinc-400" /></div>;
   }
 
   if (reorderMode) {
     return (
-      <div className="p-8 max-w-4xl mx-auto">
+      <div className="p-4 md:p-8 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-1">Reorder</p>
@@ -302,13 +331,13 @@ export default function EntryList() {
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-8 max-w-4xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-1">Content</p>
           <h1 className="text-2xl font-bold text-zinc-900">{contentType?.name}</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {isAdmin && (
             <Link to={`/content-types/${typeId}`}>
               <Button variant="outline" size="sm">Edit Collection</Button>
@@ -341,23 +370,109 @@ export default function EntryList() {
       </div>
 
       {/* Filter + sort bar — always visible once loaded */}
-      <div className="flex items-center gap-3 mb-4">
-        {/* Status tabs */}
-        <div className="flex rounded-lg border border-zinc-200 overflow-hidden text-sm bg-white">
-          {([['', 'All'], ['draft', 'Draft'], ['scheduled', 'Scheduled'], ['published', 'Published'], ['changes', 'Has Changes']] as [string, string][]).map(([val, label]) => (
-            <button
-              key={val}
-              onClick={() => { setParam('status', val || null); setPage(1); setSelected(new Set()); }}
-              className={`px-3 py-1.5 transition-colors ${statusFilter === val ? 'bg-zinc-900 text-white' : 'text-zinc-600 hover:bg-zinc-50'}`}
+      <div className="mb-4 space-y-2">
+        <div className="flex items-center gap-2">
+          {/* Status tabs — dropdown on mobile, tabs on sm+ */}
+          <div className="sm:hidden flex-1 min-w-0">
+            <Select
+              value={statusFilter || '_all'}
+              onValueChange={v => { setParam('status', v === '_all' ? null : v); setPage(1); setSelected(new Set()); }}
             >
-              {label}
+              <SelectTrigger className="h-8 text-sm w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_all">All</SelectItem>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="scheduled">Scheduled</SelectItem>
+                <SelectItem value="published">Published</SelectItem>
+                <SelectItem value="changes">Has Changes</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="hidden sm:block flex-1 min-w-0 overflow-x-auto">
+            <div className="flex rounded-lg border border-zinc-200 overflow-hidden text-sm bg-white w-fit min-w-max">
+              {([['', 'All'], ['draft', 'Draft'], ['scheduled', 'Scheduled'], ['published', 'Published'], ['changes', 'Has Changes']] as [string, string][]).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => { setParam('status', val || null); setPage(1); setSelected(new Set()); }}
+                  className={`px-3 py-1.5 transition-colors whitespace-nowrap ${statusFilter === val ? 'bg-zinc-900 text-white' : 'text-zinc-600 hover:bg-zinc-50'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Sort controls */}
+          <div className="hidden sm:flex items-center gap-2 shrink-0">
+            {displayableFields.length > 0 && (
+              <Select
+                value={extraCol ?? '_none'}
+                onValueChange={v => { setParam('extra_col', v === '_none' ? null : v); setPage(1); }}
+              >
+                <SelectTrigger className="h-8 text-sm w-36">
+                  <SelectValue placeholder="Show field…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">No extra column</SelectItem>
+                  <SelectSeparator />
+                  {displayableFields.map(f => (
+                    <SelectItem key={f.id} value={f.slug}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Select value={sortBy} onValueChange={v => { setParam('sort_by', v === 'sort_order' ? null : v); setParam('sort_dir', null); setPage(1); }}>
+              <SelectTrigger className="h-8 text-sm w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sort_order">Custom Order</SelectItem>
+                <SelectItem value="created_at">Created</SelectItem>
+                <SelectItem value="updated_at">Updated</SelectItem>
+                <SelectItem value="published_at">Published</SelectItem>
+                {sortableFields.length > 0 && (
+                  <>
+                    <SelectSeparator />
+                    {sortableFields.map(f => (
+                      <SelectItem key={f.id} value={`field:${f.slug}`}>{f.name}</SelectItem>
+                    ))}
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+            <button
+              onClick={() => { setParam('sort_dir', sortDir === 'asc' ? 'desc' : null); setPage(1); }}
+              className="flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 transition-colors text-zinc-600"
+              title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
+            >
+              {sortDir === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
             </button>
-          ))}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
+        {/* Sort controls row on mobile */}
+        <div className="flex sm:hidden items-center gap-2">
+          {displayableFields.length > 0 && (
+            <Select
+              value={extraCol ?? '_none'}
+              onValueChange={v => { setParam('extra_col', v === '_none' ? null : v); setPage(1); }}
+            >
+              <SelectTrigger className="h-8 text-sm flex-1">
+                <SelectValue placeholder="Show field…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">No extra column</SelectItem>
+                <SelectSeparator />
+                {displayableFields.map(f => (
+                  <SelectItem key={f.id} value={f.slug}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Select value={sortBy} onValueChange={v => { setParam('sort_by', v === 'sort_order' ? null : v); setParam('sort_dir', null); setPage(1); }}>
-            <SelectTrigger className="h-8 text-sm w-40">
+            <SelectTrigger className="h-8 text-sm flex-1">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -365,11 +480,19 @@ export default function EntryList() {
               <SelectItem value="created_at">Created</SelectItem>
               <SelectItem value="updated_at">Updated</SelectItem>
               <SelectItem value="published_at">Published</SelectItem>
+              {sortableFields.length > 0 && (
+                <>
+                  <SelectSeparator />
+                  {sortableFields.map(f => (
+                    <SelectItem key={f.id} value={`field:${f.slug}`}>{f.name}</SelectItem>
+                  ))}
+                </>
+              )}
             </SelectContent>
           </Select>
           <button
             onClick={() => { setParam('sort_dir', sortDir === 'asc' ? 'desc' : null); setPage(1); }}
-            className="flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 transition-colors text-zinc-600"
+            className="flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 transition-colors text-zinc-600 shrink-0"
             title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
           >
             {sortDir === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
@@ -422,7 +545,7 @@ export default function EntryList() {
       ) : (
         <div className="bg-white rounded-xl border border-zinc-200 divide-y divide-zinc-100 overflow-hidden">
           {/* Select-all header */}
-          <div className="flex items-center gap-4 px-5 py-2.5 bg-zinc-50 border-b border-zinc-200">
+          <div className="flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-2.5 bg-zinc-50 border-b border-zinc-200">
             <input
               type="checkbox"
               checked={entries.length > 0 && entries.every(e => selected.has(e.id))}
@@ -436,12 +559,19 @@ export default function EntryList() {
               }}
               className="rounded border-zinc-300"
             />
-            <span className="text-xs text-zinc-400">
+            <span className="text-xs text-zinc-400 flex-1 min-w-0">
               {selected.size > 0 ? `${selected.size} of ${entries.length} selected` : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`}
             </span>
+            {extraColField && (
+              <>
+                <span className="hidden sm:block text-xs font-medium text-zinc-500 w-32 text-right shrink-0">{extraColField.name}</span>
+                <span className="hidden sm:block shrink-0 w-28" />
+                <span className="hidden sm:block shrink-0 w-[156px]" />
+              </>
+            )}
           </div>
           {entries.map(entry => (
-            <div key={entry.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-zinc-50 group transition-colors">
+            <div key={entry.id} className="flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-3 sm:py-3.5 hover:bg-zinc-50 group transition-colors">
               <input
                 type="checkbox"
                 checked={selected.has(entry.id)}
@@ -451,14 +581,35 @@ export default function EntryList() {
               />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-zinc-900 text-sm truncate">{getEntryLabel(entry)}</p>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  {new Date(entry.created_at).toLocaleDateString()}
-                  {entry.status === 'scheduled' && entry.scheduled_at && ` · Scheduled for ${new Date(entry.scheduled_at).toLocaleString()}`}
-                  {entry.status === 'published' && entry.published_at && ` · Published ${new Date(entry.published_at).toLocaleDateString()}`}
-                </p>
+                <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                  <span className="sm:hidden shrink-0">
+                    <StatusBadge status={entry.status} hasChanges={!!entry.has_unpublished_changes} />
+                  </span>
+                  <p className="text-xs text-zinc-400 truncate">
+                    {new Date(entry.created_at).toLocaleDateString()}
+                    {entry.status === 'scheduled' && entry.scheduled_at && ` · Scheduled for ${new Date(entry.scheduled_at).toLocaleString()}`}
+                    {entry.status === 'published' && entry.published_at && ` · Published ${new Date(entry.published_at).toLocaleDateString()}`}
+                  </p>
+                </div>
               </div>
-              <StatusBadge status={entry.status} hasChanges={!!entry.has_unpublished_changes} />
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+              {/* Extra col: desktop only */}
+              {extraColField && (
+                <span className="hidden sm:block text-xs text-zinc-500 shrink-0 w-32 text-right truncate">
+                  {formatFieldValue(entry.fields[extraColField.slug], extraColField.type)}
+                </span>
+              )}
+              {/* Status badge: desktop only (shown in subtitle on mobile) */}
+              {extraColField ? (
+                <div className="hidden sm:flex shrink-0 w-28 justify-end">
+                  <StatusBadge status={entry.status} hasChanges={!!entry.has_unpublished_changes} />
+                </div>
+              ) : (
+                <span className="hidden sm:block shrink-0">
+                  <StatusBadge status={entry.status} hasChanges={!!entry.has_unpublished_changes} />
+                </span>
+              )}
+              {/* Desktop: all actions on hover */}
+              <div className="hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                 <Button
                   variant="ghost"
                   size="icon"
@@ -491,6 +642,36 @@ export default function EntryList() {
                 >
                   <Trash2 className="h-4 w-4 text-red-400" />
                 </Button>
+              </div>
+              {/* Mobile: edit + dropdown */}
+              <div className="flex sm:hidden items-center gap-0.5 shrink-0">
+                <Link to={`/content-types/${typeId}/entries/${entry.id}`}>
+                  <Button variant="ghost" size="icon" title="Edit">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                </Link>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={e => e.stopPropagation()}>
+                      <MoreHorizontal className="h-4 w-4 text-zinc-500" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handlePublish(entry)}>
+                      {entry.status === 'published'
+                        ? <><EyeOff className="h-4 w-4 mr-2" /> Unpublish</>
+                        : <><Globe className="h-4 w-4 mr-2" /> Publish</>
+                      }
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleDuplicate(entry)}>
+                      <Copy className="h-4 w-4 mr-2" /> Duplicate
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleDelete(entry)} className="text-red-600 focus:text-red-600">
+                      <Trash2 className="h-4 w-4 mr-2" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           ))}

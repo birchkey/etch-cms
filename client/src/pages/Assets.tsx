@@ -136,37 +136,37 @@ export default function Assets() {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <div>
+    <div className="p-4 md:p-8 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-zinc-900">Assets</h1>
           <p className="text-zinc-500 text-sm mt-1">Manage uploaded files and images. Accepts JPEG, PNG, GIF, WebP, AVIF, SVG, ICO, PDF, MP4, and WebM.</p>
         </div>
-        <div className="flex flex-col items-end gap-1">
+        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
           <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setShowRegister(v => !v)}>
-            <Link className="h-4 w-4 mr-2" />
-            Register R2 Asset
-          </Button>
-          <label className="cursor-pointer">
-            <Button asChild disabled={uploading}>
-              <span>
-                {uploading
-                  ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  : <Upload className="h-4 w-4 mr-2" />
-                }
-                Upload Files
-              </span>
+            <Button variant="outline" onClick={() => setShowRegister(v => !v)}>
+              <Link className="h-4 w-4 mr-2" />
+              Register R2 Asset
             </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              multiple
-              accept="image/*,video/*,application/pdf"
-              onChange={e => handleUpload(e.target.files)}
-            />
-          </label>
+            <label className="cursor-pointer">
+              <Button asChild disabled={uploading}>
+                <span>
+                  {uploading
+                    ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    : <Upload className="h-4 w-4 mr-2" />
+                  }
+                  Upload Files
+                </span>
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                multiple
+                accept="image/*,video/*,application/pdf"
+                onChange={e => handleUpload(e.target.files)}
+              />
+            </label>
           </div>
           <p className="text-xs text-zinc-400">Max {settings.upload_limit_mb} MB per file</p>
         </div>

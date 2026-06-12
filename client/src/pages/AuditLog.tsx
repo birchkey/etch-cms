@@ -69,7 +69,7 @@ export default function AuditLogPage() {
   }, [page, resourceType]);
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-4 md:p-8 max-w-4xl mx-auto">
       <div className="mb-6">
         <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-1">Admin</p>
         <h1 className="text-2xl font-bold text-zinc-900">Activity</h1>

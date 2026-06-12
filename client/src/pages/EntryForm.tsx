@@ -388,20 +388,27 @@ export default function EntryForm() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* Sticky toolbar */}
-      <div className="sticky top-0 z-30 bg-white border-b border-zinc-200 px-6 py-3 flex items-center gap-4">
+      <div className="sticky top-14 md:top-0 z-30 bg-white border-b border-zinc-200 px-3 md:px-6 py-2 md:py-3 flex items-center gap-2 md:gap-4">
         <Link to={`/content-types/${typeId}/entries`}>
           <Button variant="ghost" size="icon">
             <ChevronLeft className="h-5 w-5" />
           </Button>
         </Link>
-        <div className="flex-1">
-          <p className="text-xs text-zinc-400">{contentType?.name}</p>
-          <p className="text-sm font-semibold text-zinc-900">
-            {isNew ? 'New Entry' : 'Edit Entry'}
-          </p>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-zinc-400 truncate">{contentType?.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-zinc-900 truncate">
+              {isNew ? 'New Entry' : 'Edit Entry'}
+            </p>
+            {!isNew && entry && (
+              <span className="md:hidden shrink-0">
+                <StatusBadge status={entry.status} hasChanges={hasUnpublishedChanges} />
+              </span>
+            )}
+          </div>
         </div>
         {!isNew && entry && (
-          <div className="flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-3">
             <StatusBadge status={entry.status} hasChanges={hasUnpublishedChanges} />
             {isScheduled && entry.scheduled_at && (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-0.5">
@@ -424,7 +431,9 @@ export default function EntryForm() {
             )}
           </div>
         )}
-        <div className="flex items-center gap-2">
+
+        {/* Desktop actions */}
+        <div className="hidden md:flex items-center gap-2">
           {!isNew && entry && (
             <>
               <Button variant="outline" size="sm" onClick={handleCopyPreviewLink} disabled={copyingPreview}>
@@ -516,10 +525,64 @@ export default function EntryForm() {
             </DropdownMenu>
           )}
         </div>
+
+        {/* Mobile actions */}
+        <div className="flex md:hidden items-center gap-1.5">
+          <Button variant={isNew ? 'default' : 'outline'} size="sm" onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          </Button>
+          {!isNew && entry && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {isPublished && hasUnpublishedChanges && (
+                  <DropdownMenuItem onClick={handlePublish} disabled={publishing}>
+                    <Globe className="h-4 w-4 mr-2" /> Publish Changes
+                  </DropdownMenuItem>
+                )}
+                {isScheduled && (
+                  <DropdownMenuItem onClick={handlePublish} disabled={publishing}>
+                    <Globe className="h-4 w-4 mr-2" /> Publish Now
+                  </DropdownMenuItem>
+                )}
+                {!isPublished && !isScheduled && (
+                  <DropdownMenuItem onClick={handlePublish} disabled={publishing}>
+                    <Globe className="h-4 w-4 mr-2" /> Publish
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={handleCopyPreviewLink} disabled={copyingPreview}>
+                  <Link2 className="h-4 w-4 mr-2" /> Preview Link
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {isPublished && (
+                  <DropdownMenuItem onClick={handleUnpublish} disabled={publishing}>
+                    <EyeOff className="h-4 w-4 mr-2" /> Unpublish
+                  </DropdownMenuItem>
+                )}
+                {isScheduled && (
+                  <DropdownMenuItem onClick={handleUnschedule} disabled={publishing}>
+                    <X className="h-4 w-4 mr-2" /> Unschedule
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={handleDuplicate} disabled={duplicating}>
+                  <Copy className="h-4 w-4 mr-2" /> Duplicate
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)} className="text-red-600 focus:text-red-600">
+                  <Trash2 className="h-4 w-4 mr-2" /> Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-8 max-w-3xl mx-auto w-full">
+      <div className="flex-1 p-4 md:p-8 max-w-3xl mx-auto w-full">
         {fields.length === 0 ? (
           <div className="text-center py-20 text-zinc-400">
             <p>This content type has no fields.</p>

@@ -19,7 +19,12 @@ import {
 import { cn } from '@/lib/utils';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const location = useLocation();
   const { logout, isAdmin, username, displayName, role } = useAuth();
   const { settings } = useSettings();
@@ -34,6 +39,7 @@ export function Sidebar() {
   const navItem = (to: string, icon: React.ReactNode, label: string) => (
     <Link
       to={to}
+      onClick={() => onClose?.()}
       className={cn(
         'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
         location.pathname === to
@@ -47,7 +53,10 @@ export function Sidebar() {
   );
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 w-60 bg-zinc-900 flex flex-col">
+    <aside className={cn(
+      'fixed inset-y-0 left-0 z-40 w-60 bg-zinc-900 flex flex-col transition-transform duration-200 ease-in-out',
+      isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+    )}>
       {/* Logo / branding */}
       <div className={cn(
         'border-b border-zinc-800',
@@ -92,6 +101,7 @@ export function Sidebar() {
                 <Link
                   key={ct.id}
                   to={`/content-types/${ct.id}/entries`}
+                  onClick={() => onClose?.()}
                   className={cn(
                     'flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors',
                     isAdmin ? 'ml-2' : '',

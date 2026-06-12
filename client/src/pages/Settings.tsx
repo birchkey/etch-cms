@@ -260,7 +260,7 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-8 max-w-2xl mx-auto">
+    <div className="p-4 md:p-8 max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">Settings</h1>
