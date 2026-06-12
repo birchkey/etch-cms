@@ -501,26 +501,52 @@ contentTypes.get('/:typeId/entries', async (c) => {
 
   const ALLOWED_SORT = new Set(['created_at', 'updated_at', 'published_at', 'sort_order']);
   const rawSort = c.req.query('sort_by') ?? '';
-  const sortBy = ALLOWED_SORT.has(rawSort) ? rawSort : 'sort_order';
   const sortDir = c.req.query('sort_dir') === 'desc' ? 'DESC' : 'ASC';
-  // Push NULL published_at values to the bottom regardless of sort direction
-  const orderClause = sortBy === 'published_at'
-    ? `ORDER BY published_at IS NULL, published_at ${sortDir}`
-    : `ORDER BY ${sortBy} ${sortDir}`;
+
+  // Support field-based sorting via "field:SLUG" format
+  let sortJoin = '';
+  const sortJoinBindings: unknown[] = [];
+  let orderClause: string;
+
+  if (rawSort.startsWith('field:')) {
+    const fieldSlug = rawSort.slice(6);
+    const sortField = await c.env.DB.prepare(
+      'SELECT id, type FROM fields WHERE content_type_id = ? AND slug = ?'
+    ).bind(typeId, fieldSlug).first<{ id: string; type: string }>();
+
+    if (sortField) {
+      sortJoin = 'LEFT JOIN entry_fields _sf ON _sf.entry_id = e.id AND _sf.field_id = ?';
+      sortJoinBindings.push(sortField.id);
+      const sortExpr = sortField.type === 'number'
+        ? 'CAST(_sf.value AS REAL)'
+        : sortField.type === 'datetime'
+          ? "json_extract(_sf.value, '$.datetime')"
+          : '_sf.value';
+      orderClause = `ORDER BY ${sortExpr} IS NULL, ${sortExpr} ${sortDir}`;
+    } else {
+      orderClause = 'ORDER BY e.sort_order ASC';
+    }
+  } else {
+    const sortBy = ALLOWED_SORT.has(rawSort) ? rawSort : 'sort_order';
+    // Push NULL published_at values to the bottom regardless of sort direction
+    orderClause = sortBy === 'published_at'
+      ? `ORDER BY e.published_at IS NULL, e.published_at ${sortDir}`
+      : `ORDER BY e.${sortBy} ${sortDir}`;
+  }
 
   const q = c.req.query('q')?.trim() ?? '';
 
-  let whereClause = 'WHERE content_type_id = ?';
+  let whereClause = 'WHERE e.content_type_id = ?';
   const bindings: unknown[] = [typeId];
   if (status === 'changes') {
-    whereClause += ' AND has_unpublished_changes = 1';
+    whereClause += ' AND e.has_unpublished_changes = 1';
   } else if (status) {
-    whereClause += ' AND status = ?';
+    whereClause += ' AND e.status = ?';
     bindings.push(status);
   }
   if (q) {
     const like = `%${q}%`;
-    whereClause += ` AND (slug LIKE ? OR id IN (
+    whereClause += ` AND (e.slug LIKE ? OR e.id IN (
       SELECT entry_id FROM entry_fields ef
       JOIN fields f ON f.id = ef.field_id
       WHERE f.content_type_id = ? AND f.type IN ('text', 'rich_text', 'select') AND ef.value LIKE ?
@@ -529,13 +555,13 @@ contentTypes.get('/:typeId/entries', async (c) => {
   }
 
   const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) as count FROM entries ${whereClause}`
-  ).bind(...bindings).first<{ count: number }>();
+    `SELECT COUNT(*) as count FROM entries e ${sortJoin} ${whereClause}`
+  ).bind(...sortJoinBindings, ...bindings).first<{ count: number }>();
   const total = countRow?.count ?? 0;
 
   const entries = await c.env.DB.prepare(
-    `SELECT * FROM entries ${whereClause} ${orderClause} LIMIT ? OFFSET ?`
-  ).bind(...bindings, limit, offset).all<{
+    `SELECT e.* FROM entries e ${sortJoin} ${whereClause} ${orderClause} LIMIT ? OFFSET ?`
+  ).bind(...sortJoinBindings, ...bindings, limit, offset).all<{
     id: string; content_type_id: string; status: string; created_at: number; updated_at: number; published_at: number | null;
   }>();
 
