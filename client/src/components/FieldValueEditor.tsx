@@ -994,6 +994,7 @@ function RepeaterItemCard({
             pattern: null,
             phone_format: sf.phone_format ?? null,
             repeater_subfields: null,
+            helper_text: null,
             created_at: 0,
           };
           return (

@@ -33,6 +33,7 @@ function makeField(overrides: Partial<Field>): Field {
     pattern: null,
     phone_format: null,
     repeater_subfields: null,
+    helper_text: null,
     created_at: 0,
     ...overrides,
   };
