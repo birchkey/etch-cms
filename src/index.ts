@@ -77,7 +77,7 @@ app.get('/r2/:key{.+}', async (c) => {
       // Allow unauthenticated access to assets used as branding — the login page
       // needs to load the logo and favicon before the user has authenticated.
       const branding = await c.env.DB.prepare(
-        "SELECT value FROM settings WHERE key IN ('logo_image_url', 'favicon_url')"
+        "SELECT value FROM settings WHERE key IN ('logo_image_url', 'login_logo_image_url', 'favicon_url')"
       ).all<{ value: string }>();
       const isBranding = branding.results.some(row => row.value === `/r2/${key}`);
       if (!isBranding) return c.json({ error: 'Unauthorized' }, 401);
