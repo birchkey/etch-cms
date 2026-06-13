@@ -738,6 +738,9 @@ export default function EntryForm() {
                       </span>
                     )}
                   </div>
+                  {field.helper_text && (
+                    <p className="text-xs text-zinc-500">{field.helper_text}</p>
+                  )}
                   <FieldValueEditor
                     field={field}
                     value={rawVal}

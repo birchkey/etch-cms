@@ -169,6 +169,7 @@ export interface Field {
   pattern: string | null;
   phone_format: 'us' | 'international' | null;
   repeater_subfields: string | null; // JSON array of RepeaterSubfield definitions
+  helper_text: string | null;
   created_at: number;
 }
 
@@ -202,6 +203,7 @@ export interface FieldInput {
   pattern?: string | null;
   phone_format?: 'us' | 'international' | null;
   repeater_subfields?: string | null;
+  helper_text?: string | null;
 }
 
 export const contentTypesApi = {

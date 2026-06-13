@@ -181,6 +181,7 @@ export default function ContentTypeForm() {
         max_value: null,
         pattern: null,
         phone_format: null,
+        helper_text: null,
       },
     ]);
   };
@@ -250,6 +251,7 @@ export default function ContentTypeForm() {
       max_value: f.max_value ?? null,
       pattern: f.pattern ?? null,
       phone_format: f.phone_format ?? null,
+      helper_text: f.helper_text ?? null,
     }));
 
     try {
@@ -419,6 +421,16 @@ function SortableFieldRow({
         >
           <Trash2 className="h-4 w-4" />
         </button>
+      </div>
+
+      <div className="ml-6 space-y-1">
+        <Label className="text-xs">Helper Text</Label>
+        <Input
+          value={field.helper_text ?? ''}
+          onChange={e => updateField(field._key, { helper_text: e.target.value || null })}
+          placeholder="Optional guidance shown below the field name"
+          className="h-8 text-sm"
+        />
       </div>
 
       <div className="flex items-center gap-4 ml-6">

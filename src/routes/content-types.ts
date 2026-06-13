@@ -26,6 +26,7 @@ const FieldSchema = z.object({
   pattern: z.string().nullable().optional(),
   phone_format: z.enum(['us', 'international']).nullable().optional(),
   repeater_subfields: z.string().nullable().optional(),
+  helper_text: z.string().nullable().optional(),
 });
 const CreateContentTypeSchema = z.object({
   name: z.string().min(1, 'Name required'),
@@ -98,8 +99,8 @@ contentTypes.post('/', async (c) => {
       const fId = generateId();
       const fSlug = f.slug || slugifyUnderscore(f.name);
       return c.env.DB.prepare(
-        `INSERT INTO fields (id, content_type_id, name, slug, type, required, multiple, sort_order, relation_content_type_id, relation_cardinality, rich_text_extensions, select_options, min_length, max_length, min_value, max_value, pattern, phone_format, repeater_subfields, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO fields (id, content_type_id, name, slug, type, required, multiple, sort_order, relation_content_type_id, relation_cardinality, rich_text_extensions, select_options, min_length, max_length, min_value, max_value, pattern, phone_format, repeater_subfields, helper_text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         fId, id, f.name, fSlug, f.type,
         f.required ? 1 : 0,
@@ -116,6 +117,7 @@ contentTypes.post('/', async (c) => {
         f.pattern ?? null,
         f.phone_format ?? null,
         f.repeater_subfields ?? null,
+        f.helper_text ?? null,
         now
       );
     });
@@ -229,7 +231,7 @@ contentTypes.put('/:id', async (c) => {
           `UPDATE fields SET name = ?, slug = ?, type = ?, required = ?, multiple = ?, sort_order = ?,
            relation_content_type_id = ?, relation_cardinality = ?, rich_text_extensions = ?, select_options = ?,
            min_length = ?, max_length = ?, min_value = ?, max_value = ?, pattern = ?, phone_format = ?,
-           repeater_subfields = ? WHERE id = ?`
+           repeater_subfields = ?, helper_text = ? WHERE id = ?`
         ).bind(
           f.name, fSlug, f.type,
           f.required ? 1 : 0,
@@ -246,13 +248,14 @@ contentTypes.put('/:id', async (c) => {
           f.pattern ?? null,
           f.phone_format ?? null,
           f.repeater_subfields ?? null,
+          f.helper_text ?? null,
           f.id
         ));
       } else {
         const fId = generateId();
         stmts.push(c.env.DB.prepare(
-          `INSERT INTO fields (id, content_type_id, name, slug, type, required, multiple, sort_order, relation_content_type_id, relation_cardinality, rich_text_extensions, select_options, min_length, max_length, min_value, max_value, pattern, phone_format, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO fields (id, content_type_id, name, slug, type, required, multiple, sort_order, relation_content_type_id, relation_cardinality, rich_text_extensions, select_options, min_length, max_length, min_value, max_value, pattern, phone_format, helper_text, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           fId, id, f.name, fSlug, f.type,
           f.required ? 1 : 0,
@@ -268,6 +271,7 @@ contentTypes.put('/:id', async (c) => {
           f.max_value ?? null,
           f.pattern ?? null,
           f.phone_format ?? null,
+          f.helper_text ?? null,
           now
         ));
       }
