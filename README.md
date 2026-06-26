@@ -184,6 +184,15 @@ Rich text is returned as HTML. Etch automatically:
 
 In Webstudio, render rich text using a **Content Embed** component.
 
+> **Security: sanitize before rendering.** Rich text fields may contain arbitrary HTML if the **HTML Blocks** extension is enabled for that field. Always sanitize the HTML before rendering it in your frontend — never pass it directly to `dangerouslySetInnerHTML` or `innerHTML` without sanitization. [DOMPurify](https://github.com/cure53/DOMPurify) is the standard tool for this:
+>
+> ```js
+> import DOMPurify from 'dompurify';
+> const clean = DOMPurify.sanitize(entry.fields.body);
+> ```
+>
+> Even without HTML Blocks enabled, sanitization is a good default practice for any user-generated HTML.
+
 ### Relation fields
 
 Relation fields are fully resolved inline — no second request needed:

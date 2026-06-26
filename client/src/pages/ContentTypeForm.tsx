@@ -61,6 +61,8 @@ const ALL_RICH_TEXT_EXTENSIONS = [
   { key: 'orderedList',   label: 'Numbered List' },
   { key: 'link',          label: 'Links' },
   { key: 'image',         label: 'Images' },
+  { key: 'video',         label: 'Video' },
+  { key: 'rawHtml',       label: 'HTML Blocks' },
 ] as const;
 
 const FIELD_TYPES = [

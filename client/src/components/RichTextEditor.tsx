@@ -1,16 +1,82 @@
-import { useEditor, EditorContent, Editor } from '@tiptap/react';
+import { useEditor, EditorContent, Editor, NodeViewProps } from '@tiptap/react';
+import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
+import { Node, mergeAttributes } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
+import DOMPurify from 'dompurify';
 import { useEffect, useCallback, useState } from 'react';
 import {
   Bold, Italic, Strikethrough, Code, List, ListOrdered, Quote,
-  Heading1, Heading2, Heading3, Link2, Image as ImageIcon,
+  Heading1, Heading2, Heading3, Link2, Image as ImageIcon, Film, Braces,
   Undo, Redo, Minus, Code2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AssetPicker } from './AssetPicker';
+
+const VideoExtension = Node.create({
+  name: 'video',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return { src: { default: null } };
+  },
+
+  parseHTML() {
+    return [{ tag: 'video[src]' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['video', mergeAttributes({ controls: true, style: 'max-width:100%' }, HTMLAttributes)];
+  },
+});
+
+function RawHtmlNodeView({ node, updateAttributes }: NodeViewProps) {
+  return (
+    <NodeViewWrapper>
+      <div className="my-2 rounded-md border border-amber-200 bg-amber-50">
+        <div className="px-2 pt-1.5 pb-0.5 font-mono text-xs text-amber-600 select-none">HTML</div>
+        <textarea
+          value={node.attrs.html ?? ''}
+          onChange={e => updateAttributes({ html: e.target.value })}
+          className="w-full resize-y bg-transparent px-2 pb-2 font-mono text-sm text-zinc-800 outline-none"
+          rows={3}
+          spellCheck={false}
+        />
+      </div>
+    </NodeViewWrapper>
+  );
+}
+
+const RawHtmlExtension = Node.create({
+  name: 'rawHtml',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return { html: { default: '' } };
+  },
+
+  parseHTML() {
+    return [{
+      tag: 'div[data-raw-html]',
+      getAttrs: dom => ({ html: (dom as HTMLElement).innerHTML }),
+    }];
+  },
+
+  renderHTML({ node }) {
+    const div = document.createElement('div');
+    div.setAttribute('data-raw-html', '');
+    div.innerHTML = node.attrs.html ?? '';
+    return { dom: div };
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(RawHtmlNodeView);
+  },
+});
 
 interface RichTextEditorProps {
   value: string;
@@ -46,7 +112,7 @@ function ToolbarButton({
 }
 
 function Toolbar({ editor, allowed }: { editor: Editor; allowed: Set<string> | null }) {
-  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<'image' | 'video' | null>(null);
 
   const setLink = useCallback(() => {
     const url = window.prompt('URL:');
@@ -61,7 +127,7 @@ function Toolbar({ editor, allowed }: { editor: Editor; allowed: Set<string> | n
   const hasInline = show('bold') || show('italic') || show('strike') || show('code');
   const hasLists = show('bulletList') || show('orderedList');
   const hasBlocks = show('blockquote') || show('codeBlock') || show('horizontalRule');
-  const hasEmbeds = show('link') || show('image');
+  const hasEmbeds = show('link') || show('image') || show('video') || show('rawHtml');
 
   return (
     <>
@@ -133,8 +199,22 @@ function Toolbar({ editor, allowed }: { editor: Editor; allowed: Set<string> | n
           </ToolbarButton>
         )}
         {show('image') && (
-          <ToolbarButton onClick={() => setAssetPickerOpen(true)} active={false} title="Insert image">
+          <ToolbarButton onClick={() => setPickerMode('image')} active={false} title="Insert image">
             <ImageIcon className="h-4 w-4" />
+          </ToolbarButton>
+        )}
+        {show('video') && (
+          <ToolbarButton onClick={() => setPickerMode('video')} active={false} title="Insert video">
+            <Film className="h-4 w-4" />
+          </ToolbarButton>
+        )}
+        {show('rawHtml') && (
+          <ToolbarButton
+            onClick={() => editor.chain().focus().insertContent({ type: 'rawHtml', attrs: { html: '' } }).run()}
+            active={false}
+            title="Insert HTML block"
+          >
+            <Braces className="h-4 w-4" />
           </ToolbarButton>
         )}
         <div className="w-px h-5 bg-zinc-200 mx-1" />
@@ -146,16 +226,24 @@ function Toolbar({ editor, allowed }: { editor: Editor; allowed: Set<string> | n
         </ToolbarButton>
       </div>
 
-      {show('image') && (
-        <AssetPicker
-          open={assetPickerOpen}
-          onClose={() => setAssetPickerOpen(false)}
-          onSelect={(url) => {
-            editor.chain().focus().setImage({ src: url }).run();
-            setAssetPickerOpen(false);
-          }}
-        />
-      )}
+      <AssetPicker
+        open={pickerMode === 'image'}
+        onClose={() => setPickerMode(null)}
+        contentTypeFilter="image/"
+        onSelect={(url) => {
+          editor.chain().focus().setImage({ src: url }).run();
+          setPickerMode(null);
+        }}
+      />
+      <AssetPicker
+        open={pickerMode === 'video'}
+        onClose={() => setPickerMode(null)}
+        contentTypeFilter="video/"
+        onSelect={(url) => {
+          editor.chain().focus().insertContent({ type: 'video', attrs: { src: url } }).run();
+          setPickerMode(null);
+        }}
+      />
     </>
   );
 }
@@ -180,6 +268,8 @@ function buildExtensions(allowedExtensions: string[] | null | undefined, placeho
       ? [Link.configure({ openOnClick: false, autolink: true })]
       : []),
     ...(allowed === null || allowed.has('image') ? [Image] : []),
+    ...(allowed === null || allowed.has('video') ? [VideoExtension] : []),
+    ...(allowed === null || allowed.has('rawHtml') ? [RawHtmlExtension] : []),
     Placeholder.configure({ placeholder }),
   ];
 }
@@ -220,10 +310,14 @@ export function useRichTextEditor(initialValue: string) {
 
 // Standalone read-only display
 export function RichTextDisplay({ html }: { html: string }) {
+  const clean = DOMPurify.sanitize(html, {
+    ADD_TAGS: ['iframe'],
+    ADD_ATTR: ['allowfullscreen', 'frameborder', 'allow'],
+  });
   return (
     <div
       className="tiptap prose prose-sm max-w-none"
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: clean }}
     />
   );
 }

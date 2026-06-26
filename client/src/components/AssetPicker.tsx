@@ -8,7 +8,7 @@ import {
 } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Check, Loader2, Search, Upload } from 'lucide-react';
+import { Check, Film, Loader2, Search, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AssetPickerProps {
@@ -17,9 +17,10 @@ interface AssetPickerProps {
   onSelect: (url: string, asset: Asset) => void;
   multiSelect?: boolean;
   onSelectMultiple?: (urls: string[]) => void;
+  contentTypeFilter?: string;
 }
 
-export function AssetPicker({ open, onClose, onSelect, multiSelect, onSelectMultiple }: AssetPickerProps) {
+export function AssetPicker({ open, onClose, onSelect, multiSelect, onSelectMultiple, contentTypeFilter }: AssetPickerProps) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -38,7 +39,8 @@ export function AssetPicker({ open, onClose, onSelect, multiSelect, onSelectMult
   }, [open]);
 
   const filtered = assets.filter(a =>
-    a.original_name.toLowerCase().includes(search.toLowerCase())
+    a.original_name.toLowerCase().includes(search.toLowerCase()) &&
+    (!contentTypeFilter || a.content_type.startsWith(contentTypeFilter))
   );
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,6 +122,7 @@ export function AssetPicker({ open, onClose, onSelect, multiSelect, onSelectMult
               {filtered.map(asset => {
                 const url = assetsApi.url(asset.r2_key);
                 const isImage = asset.content_type.startsWith('image/');
+                const isVideo = asset.content_type.startsWith('video/');
                 const selected = selectedIds.has(asset.id);
                 return (
                   <button
@@ -134,6 +137,11 @@ export function AssetPicker({ open, onClose, onSelect, multiSelect, onSelectMult
                   >
                     {isImage ? (
                       <img src={url} alt={asset.original_name} className="w-full h-full object-cover" />
+                    ) : isVideo ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-100 text-zinc-400 gap-1.5 p-2">
+                        <Film className="h-6 w-6 shrink-0" />
+                        <span className="text-xs text-center line-clamp-2">{asset.original_name}</span>
+                      </div>
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-zinc-100 text-zinc-400 text-xs text-center p-2">
                         {asset.original_name}
