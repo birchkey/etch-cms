@@ -15,13 +15,56 @@ import {
 import { cn } from '@/lib/utils';
 import { AssetPicker } from './AssetPicker';
 
+function VideoNodeView({ node, updateAttributes }: NodeViewProps) {
+  const [posterPickerOpen, setPosterPickerOpen] = useState(false);
+  const { src, poster } = node.attrs;
+
+  return (
+    <NodeViewWrapper>
+      <div className="my-2">
+        <video src={src} poster={poster ?? undefined} controls style={{ maxWidth: '100%' }} />
+        <div className="flex items-center gap-3 mt-1">
+          <button
+            type="button"
+            onClick={() => setPosterPickerOpen(true)}
+            className="text-xs text-zinc-500 hover:text-zinc-800 transition-colors"
+          >
+            {poster ? 'Change poster' : 'Set poster'}
+          </button>
+          {poster && (
+            <button
+              type="button"
+              onClick={() => updateAttributes({ poster: null })}
+              className="text-xs text-zinc-400 hover:text-red-500 transition-colors"
+            >
+              Remove poster
+            </button>
+          )}
+        </div>
+      </div>
+      <AssetPicker
+        open={posterPickerOpen}
+        onClose={() => setPosterPickerOpen(false)}
+        contentTypeFilter="image/"
+        onSelect={(url) => {
+          updateAttributes({ poster: url });
+          setPosterPickerOpen(false);
+        }}
+      />
+    </NodeViewWrapper>
+  );
+}
+
 const VideoExtension = Node.create({
   name: 'video',
   group: 'block',
   atom: true,
 
   addAttributes() {
-    return { src: { default: null } };
+    return {
+      src: { default: null },
+      poster: { default: null },
+    };
   },
 
   parseHTML() {
@@ -30,6 +73,10 @@ const VideoExtension = Node.create({
 
   renderHTML({ HTMLAttributes }) {
     return ['video', mergeAttributes({ controls: true, style: 'max-width:100%' }, HTMLAttributes)];
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(VideoNodeView);
   },
 });
 
