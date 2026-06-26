@@ -23,7 +23,7 @@ import { RichTextEditor } from './RichTextEditor';
 import { AssetPicker } from './AssetPicker';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical, ChevronDown } from 'lucide-react';
+import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical, ChevronDown, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FaIconMeta } from '@/lib/fa-icons';
 
@@ -406,7 +406,24 @@ export function FieldValueEditor({ field, value, onChange }: FieldValueEditorPro
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-zinc-500">Time zone</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-zinc-500">Time zone</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-auto py-0 px-1 text-xs text-zinc-400 hover:text-zinc-700"
+                onClick={() => {
+                  const now = new Date();
+                  const datePart = now.toLocaleDateString('en-CA', { timeZone: dtParsed.timezone });
+                  const timePart = now.toLocaleTimeString('en-GB', { timeZone: dtParsed.timezone, hour: '2-digit', minute: '2-digit' });
+                  onChange({ datetime: `${datePart}T${timePart}`, timezone: dtParsed.timezone });
+                }}
+              >
+                <Clock className="h-3 w-3 mr-1" />
+                Now
+              </Button>
+            </div>
             <TimezoneSelect
               value={dtParsed.timezone}
               onChange={tz => onChange({ datetime: dtParsed.datetime, timezone: tz })}
