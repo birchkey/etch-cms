@@ -76,6 +76,16 @@ function formatDatetime(rawValue: string): Record<string, unknown> | null {
   return { iso: datetimeStr, long: longStr, date: dateStr, time: timeStr, timestamp, timezone };
 }
 
+async function rewriteRichTextAssetUrls(html: string, baseUrl: string, secret: string | undefined): Promise<string> {
+  const r2Paths: string[] = [];
+  html.replace(/(src|poster)="(\/r2\/[^"]+)"/g, (_, _attr, path: string) => { r2Paths.push(path); return ''; });
+  const signedPaths = secret
+    ? await Promise.all(r2Paths.map(p => signAssetUrl(p, secret)))
+    : r2Paths;
+  let ri = 0;
+  return html.replace(/(src|poster)="(\/r2\/[^"]+)"/g, (_, attr) => `${attr}="${baseUrl}${signedPaths[ri++]}"`);
+}
+
 function addHeadingIds(html: string): string {
   return html.replace(/<(h[12])>(.*?)<\/\1>/gis, (match, tag, content) => {
     const text = content.replace(/<[^>]+>/g, '').trim();
@@ -247,18 +257,7 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
         };
       }
     } else if (f.type === 'rich_text' && rawValue) {
-      // Collect /r2/ paths, sign them, then rewrite src attributes to full URLs
-      const r2Paths: string[] = [];
-      rawValue.replace(/src="(\/r2\/[^"]+)"/g, (_, path: string) => { r2Paths.push(path); return ''; });
-      const signedPaths = secret
-        ? await Promise.all(r2Paths.map(p => signAssetUrl(p, secret)))
-        : r2Paths;
-      let ri = 0;
-      const withImages = rawValue.replace(
-        /src="(\/r2\/[^"]+)"/g,
-        () => `src="${baseUrl}${signedPaths[ri++]}"`
-      );
-      fieldValues[f.slug] = addHeadingIds(withImages);
+      fieldValues[f.slug] = addHeadingIds(await rewriteRichTextAssetUrls(rawValue, baseUrl, secret));
     } else if (f.type === 'relation' && rawValue) {
       const parsed = parseFieldValue(rawValue, 'relation');
       if (typeof parsed === 'string') {
@@ -304,16 +303,7 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
                 expanded[sf.slug] = { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(path) ?? null) : null };
               }
             } else if (sf.type === 'rich_text' && typeof val === 'string') {
-              const r2Paths: string[] = [];
-              val.replace(/src="(\/r2\/[^"]+)"/g, (_, p: string) => { r2Paths.push(p); return ''; });
-              const signedPaths = secret
-                ? await Promise.all(r2Paths.map(p => signAssetUrl(p, secret)))
-                : r2Paths;
-              let ri = 0;
-              expanded[sf.slug] = addHeadingIds(val.replace(
-                /src="(\/r2\/[^"]+)"/g,
-                () => `src="${baseUrl}${signedPaths[ri++]}"`
-              ));
+              expanded[sf.slug] = addHeadingIds(await rewriteRichTextAssetUrls(val, baseUrl, secret));
             } else if (sf.type === 'datetime') {
               const rawVal = val === null ? null : (typeof val === 'string' ? val : JSON.stringify(val));
               expanded[sf.slug] = rawVal ? formatDatetime(rawVal) : null;
@@ -487,16 +477,7 @@ async function hydrateRelatedEntry(
                 expanded[sf.slug] = { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(path) ?? null) : null };
               }
             } else if (sf.type === 'rich_text' && typeof val === 'string') {
-              const r2Paths: string[] = [];
-              val.replace(/src="(\/r2\/[^"]+)"/g, (_, p: string) => { r2Paths.push(p); return ''; });
-              const signedPaths = secret
-                ? await Promise.all(r2Paths.map(p => signAssetUrl(p, secret)))
-                : r2Paths;
-              let ri = 0;
-              expanded[sf.slug] = addHeadingIds(val.replace(
-                /src="(\/r2\/[^"]+)"/g,
-                () => `src="${baseUrl}${signedPaths[ri++]}"`
-              ));
+              expanded[sf.slug] = addHeadingIds(await rewriteRichTextAssetUrls(val, baseUrl, secret));
             } else if (sf.type === 'datetime') {
               const rawVal = val === null ? null : (typeof val === 'string' ? val : JSON.stringify(val));
               expanded[sf.slug] = rawVal ? formatDatetime(rawVal) : null;
