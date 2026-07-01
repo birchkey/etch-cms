@@ -3,7 +3,7 @@ import { assetsApi, Asset, PaginatedResponse } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Upload, Search, Trash2, Copy, Loader2, FileText, ChevronLeft, ChevronRight, Link } from 'lucide-react';
+import { Upload, Search, Trash2, Copy, Loader2, FileText, ChevronLeft, ChevronRight, Link, Globe, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePageTitle, useSettings } from '@/lib/settings';
 
@@ -126,6 +126,16 @@ export default function Assets() {
       setAssets(prev => prev.map(a => a.id === id ? updated : a));
     } catch {
       toast.error('Failed to save alt text');
+    }
+  };
+
+  const handleTogglePublic = async (asset: Asset) => {
+    try {
+      const updated = await assetsApi.update(asset.id, { is_public: !asset.is_public });
+      setAssets(prev => prev.map(a => a.id === asset.id ? updated : a));
+      toast.success(updated.is_public ? 'Asset is now publicly accessible' : 'Asset is now private');
+    } catch {
+      toast.error('Failed to update asset');
     }
   };
 
@@ -252,6 +262,12 @@ export default function Assets() {
                       </span>
                     </div>
                   )}
+                  {asset.is_public ? (
+                    <div className="absolute top-1.5 left-1.5 flex items-center gap-1 bg-green-500 text-white text-[10px] font-medium px-1.5 py-0.5 rounded-md">
+                      <Globe className="h-2.5 w-2.5" />
+                      Public
+                    </div>
+                  ) : null}
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center justify-center gap-2">
                     <button
                       onClick={() => copyUrl(asset)}
@@ -259,6 +275,16 @@ export default function Assets() {
                       title="Copy URL"
                     >
                       <Copy className="h-4 w-4 text-zinc-700" />
+                    </button>
+                    <button
+                      onClick={() => handleTogglePublic(asset)}
+                      className="p-2 bg-white rounded-lg hover:bg-zinc-100 transition-colors"
+                      title={asset.is_public ? 'Make private' : 'Make public (permanent URL)'}
+                    >
+                      {asset.is_public
+                        ? <Lock className="h-4 w-4 text-zinc-700" />
+                        : <Globe className="h-4 w-4 text-zinc-700" />
+                      }
                     </button>
                     <button
                       onClick={() => handleDelete(asset)}

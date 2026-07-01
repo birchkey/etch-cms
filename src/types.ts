@@ -94,6 +94,7 @@ export interface AssetRow {
   size: number;
   r2_key: string;
   alt_text: string | null;
+  is_public: number; // 0 or 1
   created_at: number;
 }
 

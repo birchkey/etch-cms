@@ -411,6 +411,7 @@ export interface Asset {
   size: number;
   r2_key: string;
   alt_text: string | null;
+  is_public: number; // 0 or 1
   created_at: number;
 }
 
@@ -429,7 +430,7 @@ export const assetsApi = {
     form.append('file', file);
     return request<Asset>('/assets', { method: 'POST', body: form });
   },
-  update: (id: string, data: { alt_text?: string | null }) =>
+  update: (id: string, data: { alt_text?: string | null; is_public?: boolean }) =>
     request<Asset>(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: (id: string) => request<{ ok: true }>(`/assets/${id}`, { method: 'DELETE' }),
   register: (data: { r2_key: string; alt_text?: string | null }) =>

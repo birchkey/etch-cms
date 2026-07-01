@@ -10,7 +10,10 @@ const RegisterAssetSchema = z.object({
   r2_key: z.string().min(1, 'r2_key required'),
   alt_text: z.string().nullable().optional(),
 });
-const UpdateAssetSchema = z.object({ alt_text: z.string().nullable().optional() });
+const UpdateAssetSchema = z.object({
+  alt_text: z.string().nullable().optional(),
+  is_public: z.boolean().optional(),
+});
 
 const assets = new Hono<{ Bindings: Env; Variables: { jwtPayload: unknown } }>();
 
@@ -148,10 +151,11 @@ assets.patch('/:id', async (c) => {
   const patchParsed = parseBody(UpdateAssetSchema, raw);
   if (!patchParsed.ok) return c.json({ error: patchParsed.error }, 400);
   const altText = typeof patchParsed.data.alt_text === 'string' ? patchParsed.data.alt_text.trim() || null : null;
+  const isPublic = typeof patchParsed.data.is_public === 'boolean' ? (patchParsed.data.is_public ? 1 : 0) : asset.is_public;
 
   await c.env.DB.prepare(
-    'UPDATE assets SET alt_text = ? WHERE id = ?'
-  ).bind(altText, id).run();
+    'UPDATE assets SET alt_text = ?, is_public = ? WHERE id = ?'
+  ).bind(altText, isPublic, id).run();
 
   const updated = await c.env.DB.prepare('SELECT * FROM assets WHERE id = ?').bind(id).first<AssetRow>();
   return c.json(updated);
