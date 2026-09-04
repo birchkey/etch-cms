@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -15,7 +15,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
-import { Field, RepeaterSubfield, contentTypesApi, assetsApi } from '@/lib/api';
+import { Field, RepeaterSubfield, contentTypesApi, assetsApi, type Asset } from '@/lib/api';
 import { Input } from './ui/input';
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
@@ -23,7 +23,8 @@ import { RichTextEditor } from './RichTextEditor';
 import { AssetPicker } from './AssetPicker';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical, ChevronDown, Clock } from 'lucide-react';
+import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical, ChevronDown, Clock, Loader2, Copy } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import type { FaIconMeta } from '@/lib/fa-icons';
 
@@ -39,25 +40,199 @@ function filenameFromUrl(url: string): string {
   return decodeURIComponent(url.split('?')[0].split('/').pop() ?? url);
 }
 
-// Module-level cache so repeated renders don't re-fetch
-const assetNameCache = new Map<string, string>();
+// Module-level cache so repeated renders don't re-fetch, keyed by the stored /r2/ URL.
+// Alt text and the public flag live on the asset record, so the same file referenced by
+// two fields shares one set of values — the listeners keep every on-screen copy in step
+// when one of them is edited.
+const assetCache = new Map<string, Asset>();
+const assetListeners = new Map<string, Set<() => void>>();
+// In-flight lookups, so the same file referenced by several fields is fetched once.
+const assetFetches = new Map<string, Promise<unknown>>();
+
+function publishAsset(url: string, asset: Asset) {
+  assetCache.set(url, asset);
+  assetListeners.get(url)?.forEach(notify => notify());
+}
+
+function subscribeToAsset(url: string, notify: () => void): () => void {
+  let listeners = assetListeners.get(url);
+  if (!listeners) {
+    listeners = new Set();
+    assetListeners.set(url, listeners);
+  }
+  listeners.add(notify);
+  return () => {
+    listeners.delete(notify);
+    if (listeners.size === 0) assetListeners.delete(url);
+  };
+}
+
+function useAsset(url: string | null): [Asset | null, (asset: Asset) => void] {
+  const subscribe = useCallback(
+    (notify: () => void) => (url ? subscribeToAsset(url, notify) : () => {}),
+    [url],
+  );
+  // The cache returns the same object identity until publishAsset replaces it, which is
+  // what useSyncExternalStore needs from a snapshot.
+  const asset = useSyncExternalStore(
+    subscribe,
+    () => (url ? assetCache.get(url) ?? null : null),
+  );
+
+  useEffect(() => {
+    if (!url || assetCache.has(url) || assetFetches.has(url)) return;
+    const pending = assetsApi.list({ filename: filenameFromUrl(url), limit: 1 })
+      .then(res => {
+        const found = res.data[0];
+        if (found) publishAsset(url, found);
+      })
+      .catch(() => {})
+      .finally(() => assetFetches.delete(url));
+    assetFetches.set(url, pending);
+  }, [url]);
+
+  const update = useCallback((next: Asset) => {
+    if (url) publishAsset(url, next);
+  }, [url]);
+
+  return [asset, update];
+}
 
 function useAssetName(url: string | null): string | null {
-  const [name, setName] = useState<string | null>(() => (url ? assetNameCache.get(url) ?? null : null));
-  useEffect(() => {
-    if (!url || assetNameCache.has(url)) return;
-    const filename = filenameFromUrl(url);
-    assetsApi.list({ filename, limit: 1 })
-      .then(res => {
-        const originalName = res.data[0]?.original_name ?? null;
-        if (originalName) {
-          assetNameCache.set(url, originalName);
-          setName(originalName);
-        }
-      })
-      .catch(() => {});
-  }, [url]);
-  return name;
+  return useAsset(url)[0]?.original_name ?? null;
+}
+
+// Alt text and public-link controls for the asset behind a field value. Both write to the
+// shared asset record, so an edit here is the same edit the asset library would make.
+function AssetMetaEditor({ url, compact = false }: { url: string; compact?: boolean }) {
+  const [asset, updateAsset] = useAsset(url);
+  // null means "not being edited" — the input then shows the stored value, so an edit
+  // made to the same asset elsewhere on the page appears here too.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [savingAlt, setSavingAlt] = useState(false);
+  const [savingPublic, setSavingPublic] = useState(false);
+
+  if (!asset) return null;
+  const alt = draft ?? asset.alt_text ?? '';
+  const isImage = asset.content_type.startsWith('image/');
+
+  const saveAlt = async () => {
+    if (draft === null) return;
+    const trimmed = draft.trim();
+    if (trimmed === (asset.alt_text ?? '')) {
+      setDraft(null);
+      return;
+    }
+    setSavingAlt(true);
+    try {
+      updateAsset(await assetsApi.update(asset.id, { alt_text: trimmed || null }));
+    } catch {
+      toast.error('Failed to save alt text');
+    } finally {
+      // Held until the record is updated, so the input keeps showing what was typed
+      // rather than flashing back to the old value mid-request.
+      setDraft(null);
+      setSavingAlt(false);
+    }
+  };
+
+  const togglePublic = async (next: boolean) => {
+    setSavingPublic(true);
+    try {
+      const updated = await assetsApi.update(asset.id, { is_public: next });
+      updateAsset(updated);
+      toast.success(updated.is_public ? 'Asset is now publicly accessible' : 'Asset is now private');
+    } catch {
+      toast.error('Failed to update asset');
+    } finally {
+      setSavingPublic(false);
+    }
+  };
+
+  const publicUrl = assetsApi.absoluteUrl(asset.r2_key);
+
+  const copyPublicUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      toast.success('Public link copied');
+    } catch {
+      toast.error('Could not copy — select the link and copy manually');
+    }
+  };
+
+  return (
+    <div className={cn('space-y-2', compact ? 'w-32' : 'max-w-md')}>
+      {isImage && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <Label className="text-xs font-medium text-zinc-600">Alt text</Label>
+            {savingAlt && <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />}
+          </div>
+          <Input
+            value={alt}
+            onChange={e => setDraft(e.target.value)}
+            onBlur={saveAlt}
+            placeholder="Describe this image"
+            className={compact ? 'h-7 text-xs' : 'h-8 text-sm'}
+          />
+          {!compact && (
+            <p className="text-xs text-zinc-400">
+              Read aloud by screen readers. Stored on the file, so every entry using it shares this text.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label className="text-xs font-medium text-zinc-600">Public link</Label>
+          {!compact && (
+            <p className="text-xs text-zinc-400">
+              Serve this file at a permanent URL instead of one that expires after an hour. Turn on
+              for anything visitors keep — a PDF form, a download link, an og:image.
+            </p>
+          )}
+        </div>
+        <Switch
+          checked={!!asset.is_public}
+          disabled={savingPublic}
+          onCheckedChange={togglePublic}
+        />
+      </div>
+
+      {/* The link only exists once the asset is public, so it appears with the toggle
+          rather than sitting there as a URL that would 401 for a visitor. */}
+      {!!asset.is_public && (
+        compact ? (
+          <button
+            type="button"
+            onClick={copyPublicUrl}
+            className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700"
+          >
+            <Copy className="h-3 w-3" />
+            Copy link
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <Input
+              readOnly
+              value={publicUrl}
+              onFocus={e => e.currentTarget.select()}
+              className="h-8 text-xs font-mono text-zinc-600"
+            />
+            <Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={copyPublicUrl}>
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+            <Button asChild type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0">
+              <a href={publicUrl} target="_blank" rel="noreferrer" title="Open in new tab">
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </Button>
+          </div>
+        )
+      )}
+    </div>
+  );
 }
 
 function AssetThumbnail({ url, name, className }: { url: string; name?: string | null; className?: string }) {
@@ -676,6 +851,7 @@ function ImageFieldEditor({ value, onChange }: { value: string | null; onChange:
               </a>
             )}
           </div>
+          <AssetMetaEditor url={value} />
         </div>
       ) : (
         <div
@@ -715,19 +891,22 @@ function MultiImageEditor({ value, onChange }: { value: string[] | null; onChang
   return (
     <div className="space-y-3">
       {images.length > 0 && (
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-start gap-3">
           {images.map((url, i) => (
-            <div key={i} className="relative">
-              <div className="h-32 w-32 rounded-md border border-zinc-200 overflow-hidden">
-                <AssetThumbnailWithName url={url} />
+            <div key={i} className="space-y-2">
+              <div className="relative">
+                <div className="h-32 w-32 rounded-md border border-zinc-200 overflow-hidden">
+                  <AssetThumbnailWithName url={url} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => remove(i)}
+                  className="absolute -top-2 -right-2 bg-white rounded-full border border-zinc-200 p-0.5 hover:bg-zinc-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => remove(i)}
-                className="absolute -top-2 -right-2 bg-white rounded-full border border-zinc-200 p-0.5 hover:bg-zinc-100"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              <AssetMetaEditor url={url} compact />
             </div>
           ))}
         </div>

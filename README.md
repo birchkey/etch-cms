@@ -27,7 +27,8 @@ The result is a CMS that's effectively free to run at low-to-moderate traffic, g
 - **Globals** — mark any content type "single entry" to get one always-published set of values (contact details, social links, SEO defaults) instead of a list
 - **11 field types** — text, rich text, email, phone, image (single or multiple), number, datetime, boolean, relation (one-to-many), select, color
 - **Draft / Published / Scheduled** workflow — published entries track unpublished edits separately so you can stage changes without taking content offline
-- **Asset management** — upload images (JPEG, PNG, WebP, GIF, AVIF, SVG), PDFs, and video (MP4, WebM) to R2 with alt text support; magic-byte validation prevents MIME spoofing
+- **Asset management** — upload images (JPEG, PNG, WebP, GIF, AVIF, SVG), PDFs, and video (MP4, WebM) to R2; alt text editable inline from the entry editor; magic-byte validation prevents MIME spoofing
+- **Public assets** — mark a file public to serve it at a permanent, unsigned URL instead of an expiring one, for PDF forms and download links visitors keep
 - **Webhooks** — HMAC-SHA256 signed payloads, automatic retry, delivery logs, test-fire button
 - **User management** — admin and editor roles with JWT auth and refresh tokens
 - **Preview URLs** — generate a signed, time-limited link to preview a draft entry on your frontend before publishing
@@ -201,11 +202,37 @@ Add your Webstudio site's deploy hook URL in Etch's Webhooks section. Etch will 
 
 The webhook payload includes an `X-Webhook-Signature` header (`sha256=<hmac>`) signed with your webhook secret, so you can verify the request is genuine before triggering a rebuild.
 
+### Asset URLs: signed vs. public
+
+The **Image / Asset** field type holds any file in your library — images, PDFs, video. Every asset reference comes back as `{ url, alt_text }`, but there are two kinds of `url`:
+
+| | URL shape | Lifetime | Use for |
+|---|---|---|---|
+| Default | `/r2/abc.pdf?expires=…&sig=…` | 1 hour | Images your frontend re-fetches on every render |
+| **Public** | `/r2/abc.pdf` | Permanent | Anything a visitor keeps |
+
+Signed URLs are the safe default, but they expire. That's invisible for an `<img>` on a server-rendered page and fatal for anything that outlives the API response — a PDF form someone bookmarks or emails, a download link on a statically-built page, an `og:image` a scraper fetches tomorrow.
+
+Toggle **Public link** on the asset (in the entry editor beside the file, or in the Assets library) and Etch stops signing it — the public API returns the bare `/r2/` path, and the `/r2/` route serves it to anyone. Use it for files you'd be comfortable handing anyone the link to; leave it off for anything gated.
+
+Turning the toggle on reveals the permanent URL right below it, with buttons to copy it or open it in a new tab — that's the link to paste into a Webstudio button, an email, or a nav item.
+
+> **Copying a private asset's URL.** The Assets library's copy button works on private assets too, but the URL it gives you only resolves for a signed-in admin — it will load in your browser and 401 for your visitors. Etch warns you when you copy one. Turn on public access before using a link anywhere public.
+
+### Alt text
+
+Alt text lives on the **asset**, not on the field, so it's written once and reused everywhere that file appears. Edit it from either place:
+
+- The entry editor, in the box beneath any image you've selected
+- The Assets library, via the asset's detail controls
+
+Because it's stored per file, changing alt text in one entry changes it in every entry using that same image. If two entries need different alt text for the same picture, upload it twice.
+
 ### Rich text fields
 
 Rich text is returned as HTML. Etch automatically:
 
-- Rewrites internal `/r2/...` image paths to full absolute URLs so images work in any context
+- Rewrites internal `/r2/...` image paths to full absolute URLs so images work in any context (these are always signed, even if the asset is marked public)
 - Adds `id` attributes to `<h1>` and `<h2>` headings for anchor links
 
 In Webstudio, render rich text using a **Content Embed** component.
@@ -471,7 +498,7 @@ GET    /api/preview/:token
 |------|-----------|-------|
 | `text` | `string` | Plain text |
 | `rich_text` | `string` (HTML) | Headings get auto-generated `id` attributes; image paths are absolute |
-| `image` | `{ url, alt_text }` or array | Single or multiple when `multiple: true` |
+| `image` | `{ url, alt_text }` or array | Any asset — image, PDF, video. Labelled **Image / Asset** in the editor. `url` is signed and expires in an hour unless the asset is marked public. Single or multiple when `multiple: true` |
 | `number` | `number` | |
 | `datetime` | `string` (ISO 8601) | |
 | `boolean` | `boolean` | |

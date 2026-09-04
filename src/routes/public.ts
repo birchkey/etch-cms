@@ -94,11 +94,40 @@ function addHeadingIds(html: string): string {
   });
 }
 
-async function getAltText(db: D1Database, storedPath: string): Promise<string | null> {
+// What the public API needs to know about a referenced asset: its alt text, and whether
+// it is served publicly (which decides between a permanent and a signed URL).
+interface AssetMeta {
+  alt_text: string | null;
+  is_public: boolean;
+}
+type AssetMetaMap = Map<string, AssetMeta>;
+
+async function getAssetMeta(db: D1Database, storedPath: string): Promise<AssetMeta | null> {
   const filename = storedPath.replace(/^\/r2\//, '');
   const r2Key = `assets/${filename}`;
-  const row = await db.prepare('SELECT alt_text FROM assets WHERE r2_key = ?').bind(r2Key).first<{ alt_text: string | null }>();
-  return row?.alt_text ?? null;
+  const row = await db
+    .prepare('SELECT alt_text, is_public FROM assets WHERE r2_key = ?')
+    .bind(r2Key)
+    .first<{ alt_text: string | null; is_public: number }>();
+  return row ? { alt_text: row.alt_text, is_public: !!row.is_public } : null;
+}
+
+// Build the { url, alt_text } object the public API returns for one asset reference.
+//
+// Signed URLs expire after an hour, which is right for an <img> the frontend re-fetches
+// on every render but wrong for anything a visitor keeps: a PDF link that is emailed,
+// bookmarked, or baked into a statically-built page. Assets marked public get their bare
+// /r2/ path instead — permanent, and already served unauthenticated by the /r2 handler.
+async function toAssetRef(
+  path: string,
+  baseUrl: string,
+  meta: AssetMetaMap | undefined,
+  secret: string | undefined,
+  db?: D1Database,
+): Promise<{ url: string; alt_text: string | null }> {
+  const info = meta ? meta.get(path) ?? null : db ? await getAssetMeta(db, path) : null;
+  const finalPath = secret && !info?.is_public ? await signAssetUrl(path, secret) : path;
+  return { url: `${baseUrl}${finalPath}`, alt_text: info?.alt_text ?? null };
 }
 
 // Collect all image paths from ef rows, including paths inside repeater field values.
@@ -156,25 +185,26 @@ function extractImagePaths(
   return paths;
 }
 
-// Batch-fetch alt texts for a set of image paths.
-// Returns a map of stored path ("/r2/...") → alt_text.
-async function fetchAltTextMap(
+// Batch-fetch alt text and public flags for a set of image paths.
+// Returns a map of stored path ("/r2/...") → AssetMeta.
+async function fetchAssetMetaMap(
   db: D1Database,
   paths: Set<string>
-): Promise<Map<string, string | null>> {
+): Promise<AssetMetaMap> {
   if (paths.size === 0) return new Map();
 
   const r2Keys = [...paths].map(p => `assets/${p.replace(/^\/r2\//, '')}`);
-  const rows = await queryInChunks<{ r2_key: string; alt_text: string | null }>(
+  const rows = await queryInChunks<{ r2_key: string; alt_text: string | null; is_public: number }>(
     db,
-    p => `SELECT r2_key, alt_text FROM assets WHERE r2_key IN (${p})`,
+    p => `SELECT r2_key, alt_text, is_public FROM assets WHERE r2_key IN (${p})`,
     r2Keys
   );
 
-  const r2KeyToAlt = new Map(rows.map(r => [r.r2_key, r.alt_text]));
-  const result = new Map<string, string | null>();
+  const byR2Key = new Map(rows.map(r => [r.r2_key, r]));
+  const result: AssetMetaMap = new Map();
   for (const p of paths) {
-    result.set(p, r2KeyToAlt.get(`assets/${p.replace(/^\/r2\//, '')}`) ?? null);
+    const row = byR2Key.get(`assets/${p.replace(/^\/r2\//, '')}`);
+    result.set(p, { alt_text: row?.alt_text ?? null, is_public: !!row?.is_public });
   }
   return result;
 }
@@ -221,7 +251,7 @@ publicApi.use('*', async (c, next) => {
 });
 
 
-async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], baseUrl: string, includeSlug = true, prefetchedEfRows?: { entry_id: string; field_id: string; value: string | null }[], altTextMap?: Map<string, string | null>, relatedData?: RelatedData, secret?: string): Promise<Record<string, unknown>> {
+async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], baseUrl: string, includeSlug = true, prefetchedEfRows?: { entry_id: string; field_id: string; value: string | null }[], assetMeta?: AssetMetaMap, relatedData?: RelatedData, secret?: string): Promise<Record<string, unknown>> {
   const efRows = prefetchedEfRows
     ? { results: prefetchedEfRows }
     : await db.prepare(
@@ -239,22 +269,14 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
         // Multiple images stored as JSON array of paths
         try {
           const paths = JSON.parse(rawValue) as string[];
-          fieldValues[f.slug] = await Promise.all(paths.map(async p => {
-            const signedPath = secret ? await signAssetUrl(p, secret) : p;
-            return {
-              url: `${baseUrl}${signedPath}`,
-              alt_text: altTextMap ? (altTextMap.get(p) ?? null) : await getAltText(db, p),
-            };
-          }));
+          fieldValues[f.slug] = await Promise.all(
+            paths.map(p => toAssetRef(p, baseUrl, assetMeta, secret, db))
+          );
         } catch {
           fieldValues[f.slug] = rawValue;
         }
       } else {
-        const signedPath = secret ? await signAssetUrl(rawValue, secret) : rawValue;
-        fieldValues[f.slug] = {
-          url: `${baseUrl}${signedPath}`,
-          alt_text: altTextMap ? (altTextMap.get(rawValue) ?? null) : await getAltText(db, rawValue),
-        };
+        fieldValues[f.slug] = await toAssetRef(rawValue, baseUrl, assetMeta, secret, db);
       }
     } else if (f.type === 'rich_text' && rawValue) {
       fieldValues[f.slug] = addHeadingIds(await rewriteRichTextAssetUrls(rawValue, baseUrl, secret));
@@ -262,12 +284,12 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
       const parsed = parseFieldValue(rawValue, 'relation');
       if (typeof parsed === 'string') {
         const relEntry = relatedData?.entries.get(parsed);
-        fieldValues[f.slug] = relEntry ? await hydrateRelatedEntry(relEntry, relatedData!, baseUrl, altTextMap, secret) : null;
+        fieldValues[f.slug] = relEntry ? await hydrateRelatedEntry(relEntry, relatedData!, baseUrl, assetMeta, secret) : null;
       } else if (Array.isArray(parsed)) {
         fieldValues[f.slug] = (await Promise.all(
           (parsed as string[]).map(relId => {
             const relEntry = relatedData?.entries.get(relId);
-            return relEntry ? hydrateRelatedEntry(relEntry, relatedData!, baseUrl, altTextMap, secret) : null;
+            return relEntry ? hydrateRelatedEntry(relEntry, relatedData!, baseUrl, assetMeta, secret) : null;
           })
         )).filter(Boolean);
       } else {
@@ -292,15 +314,11 @@ async function expandEntry(db: D1Database, entry: EntryRow, fields: FieldRow[], 
             const val = item[sf.slug] ?? null;
             if (sf.type === 'image' && val) {
               if (sf.multiple) {
-                const paths = val as string[];
-                expanded[sf.slug] = await Promise.all(paths.map(async (p: string) => {
-                  const signedPath = secret ? await signAssetUrl(p, secret) : p;
-                  return { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(p) ?? null) : null };
-                }));
+                expanded[sf.slug] = await Promise.all(
+                  (val as string[]).map(p => toAssetRef(p, baseUrl, assetMeta, secret))
+                );
               } else {
-                const path = val as string;
-                const signedPath = secret ? await signAssetUrl(path, secret) : path;
-                expanded[sf.slug] = { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(path) ?? null) : null };
+                expanded[sf.slug] = await toAssetRef(val as string, baseUrl, assetMeta, secret);
               }
             } else if (sf.type === 'rich_text' && typeof val === 'string') {
               expanded[sf.slug] = addHeadingIds(await rewriteRichTextAssetUrls(val, baseUrl, secret));
@@ -404,7 +422,7 @@ async function hydrateRelatedEntry(
   entry: EntryRow,
   relatedData: RelatedData,
   baseUrl: string,
-  altTextMap?: Map<string, string | null>,
+  assetMeta?: AssetMetaMap,
   secret?: string,
 ): Promise<Record<string, unknown>> {
   const fields = relatedData.fieldsByType.get(entry.content_type_id) ?? [];
@@ -418,22 +436,14 @@ async function hydrateRelatedEntry(
       if (f.multiple === 1) {
         try {
           const paths = JSON.parse(rawValue) as string[];
-          fieldValues[f.slug] = await Promise.all(paths.map(async p => {
-            const signedPath = secret ? await signAssetUrl(p, secret) : p;
-            return {
-              url: `${baseUrl}${signedPath}`,
-              alt_text: altTextMap ? (altTextMap.get(p) ?? null) : null,
-            };
-          }));
+          fieldValues[f.slug] = await Promise.all(
+            paths.map(p => toAssetRef(p, baseUrl, assetMeta, secret))
+          );
         } catch {
           fieldValues[f.slug] = rawValue;
         }
       } else {
-        const signedPath = secret ? await signAssetUrl(rawValue, secret) : rawValue;
-        fieldValues[f.slug] = {
-          url: `${baseUrl}${signedPath}`,
-          alt_text: altTextMap ? (altTextMap.get(rawValue) ?? null) : null,
-        };
+        fieldValues[f.slug] = await toAssetRef(rawValue, baseUrl, assetMeta, secret);
       }
     } else if (f.type === 'rich_text' && rawValue) {
       const r2Paths: string[] = [];
@@ -466,15 +476,11 @@ async function hydrateRelatedEntry(
             const val = item[sf.slug] ?? null;
             if (sf.type === 'image' && val) {
               if (sf.multiple) {
-                const paths = val as string[];
-                expanded[sf.slug] = await Promise.all(paths.map(async (p: string) => {
-                  const signedPath = secret ? await signAssetUrl(p, secret) : p;
-                  return { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(p) ?? null) : null };
-                }));
+                expanded[sf.slug] = await Promise.all(
+                  (val as string[]).map(p => toAssetRef(p, baseUrl, assetMeta, secret))
+                );
               } else {
-                const path = val as string;
-                const signedPath = secret ? await signAssetUrl(path, secret) : path;
-                expanded[sf.slug] = { url: `${baseUrl}${signedPath}`, alt_text: altTextMap ? (altTextMap.get(path) ?? null) : null };
+                expanded[sf.slug] = await toAssetRef(val as string, baseUrl, assetMeta, secret);
               }
             } else if (sf.type === 'rich_text' && typeof val === 'string') {
               expanded[sf.slug] = addHeadingIds(await rewriteRichTextAssetUrls(val, baseUrl, secret));
@@ -698,10 +704,10 @@ publicApi.get('/:typeSlug', async (c) => {
     ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
   ]);
   const imagePaths = extractImagePaths([...allEfRows, ...relEfRows], allImageFieldIds, allRepeaterFields);
-  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
+  const assetMeta = await fetchAssetMetaMap(c.env.DB, imagePaths);
 
   const data = await Promise.all(
-    entriesResult.results.map(e => expandEntry(c.env.DB, e, fields.results, baseUrl, true, efByEntry.get(e.id), altTextMap, relatedData, c.env.JWT_SECRET))
+    entriesResult.results.map(e => expandEntry(c.env.DB, e, fields.results, baseUrl, true, efByEntry.get(e.id), assetMeta, relatedData, c.env.JWT_SECRET))
   );
 
   const pages = Math.max(1, Math.ceil(total / limit));
@@ -752,8 +758,8 @@ publicApi.get('/:typeSlug/first', async (c) => {
     ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
   ]);
   const imagePaths = extractImagePaths([...efRows.results, ...relEfRows], allImageFieldIds, allRepeaterFields);
-  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
-  const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, altTextMap, relatedData, c.env.JWT_SECRET);
+  const assetMeta = await fetchAssetMetaMap(c.env.DB, imagePaths);
+  const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, assetMeta, relatedData, c.env.JWT_SECRET);
   return c.json({ data });
 });
 
@@ -793,8 +799,8 @@ publicApi.get('/:typeSlug/random', async (c) => {
     ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
   ]);
   const imagePaths = extractImagePaths([...efRows.results, ...relEfRows], allImageFieldIds, allRepeaterFields);
-  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
-  const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, altTextMap, relatedData, c.env.JWT_SECRET);
+  const assetMeta = await fetchAssetMetaMap(c.env.DB, imagePaths);
+  const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, assetMeta, relatedData, c.env.JWT_SECRET);
   return c.json({ data });
 });
 
@@ -848,8 +854,8 @@ publicApi.get('/:typeSlug/:id', async (c) => {
       ...[...previewRelatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
     ]);
     const previewImagePaths = extractImagePaths([...efRows.results, ...previewRelEfRows], previewImageFieldIds, previewRepeaterFields);
-    const previewAltTextMap = await fetchAltTextMap(c.env.DB, previewImagePaths);
-    const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, previewAltTextMap, previewRelatedData, c.env.JWT_SECRET);
+    const previewAssetMeta = await fetchAssetMetaMap(c.env.DB, previewImagePaths);
+    const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, previewAssetMeta, previewRelatedData, c.env.JWT_SECRET);
     return c.json({ data });
   }
 
@@ -878,8 +884,8 @@ publicApi.get('/:typeSlug/:id', async (c) => {
     ...[...relatedData.fieldsByType.values()].flat().filter(f => f.type === 'repeater').map(f => [f.id, f] as [string, typeof f]),
   ]);
   const imagePaths = extractImagePaths([...efRows.results, ...relEfRows], allImageFieldIds, allRepeaterFields);
-  const altTextMap = await fetchAltTextMap(c.env.DB, imagePaths);
-  const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, altTextMap, relatedData, c.env.JWT_SECRET);
+  const assetMeta = await fetchAssetMetaMap(c.env.DB, imagePaths);
+  const data = await expandEntry(c.env.DB, entry, fields.results, baseUrl, true, efRows.results, assetMeta, relatedData, c.env.JWT_SECRET);
   return c.json({ data });
 });
 

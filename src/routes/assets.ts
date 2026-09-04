@@ -150,8 +150,15 @@ assets.patch('/:id', async (c) => {
   const raw = await c.req.json().catch(() => null);
   const patchParsed = parseBody(UpdateAssetSchema, raw);
   if (!patchParsed.ok) return c.json({ error: patchParsed.error }, 400);
-  const altText = typeof patchParsed.data.alt_text === 'string' ? patchParsed.data.alt_text.trim() || null : null;
-  const isPublic = typeof patchParsed.data.is_public === 'boolean' ? (patchParsed.data.is_public ? 1 : 0) : asset.is_public;
+  // Absent means "leave alone", not "clear" — a PATCH that only flips is_public must not
+  // wipe the alt text, and one that only sets alt text must not un-publish the asset.
+  // An explicit null still clears the alt text.
+  const altText = patchParsed.data.alt_text === undefined
+    ? asset.alt_text
+    : (patchParsed.data.alt_text?.trim() || null);
+  const isPublic = patchParsed.data.is_public === undefined
+    ? asset.is_public
+    : (patchParsed.data.is_public ? 1 : 0);
 
   await c.env.DB.prepare(
     'UPDATE assets SET alt_text = ?, is_public = ? WHERE id = ?'

@@ -439,4 +439,8 @@ export const assetsApi = {
   register: (data: { r2_key: string; alt_text?: string | null }) =>
     request<Asset>('/assets/register', { method: 'POST', body: JSON.stringify(data) }),
   url: (r2Key: string) => `/r2/${r2Key.replace(/^assets\//, '')}`,
+  // Absolute form of `url` — what you paste outside the admin UI. Note this resolves for
+  // anyone only when the asset is marked public; otherwise it works in a signed-in
+  // admin's browser (session cookie) and 401s for everyone else.
+  absoluteUrl: (r2Key: string) => `${window.location.origin}${assetsApi.url(r2Key)}`,
 };

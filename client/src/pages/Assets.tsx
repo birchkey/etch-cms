@@ -139,10 +139,23 @@ export default function Assets() {
     }
   };
 
-  const copyUrl = (asset: Asset) => {
-    const url = `${window.location.origin}${assetsApi.url(asset.r2_key)}`;
-    navigator.clipboard.writeText(url);
-    toast.success('URL copied!');
+  const copyUrl = async (asset: Asset) => {
+    try {
+      await navigator.clipboard.writeText(assetsApi.absoluteUrl(asset.r2_key));
+    } catch {
+      toast.error('Could not copy to clipboard');
+      return;
+    }
+    // The same URL is copied either way, but for a private asset it only resolves for a
+    // signed-in admin — it looks fine when you test it and 401s for real visitors. Say so
+    // here rather than letting that surface as a broken link on a live page.
+    if (asset.is_public) {
+      toast.success('Public link copied — this URL is permanent');
+    } else {
+      toast.warning('URL copied, but this asset is private', {
+        description: 'It only loads for signed-in admins. Turn on public access to share it.',
+      });
+    }
   };
 
   return (
@@ -272,7 +285,7 @@ export default function Assets() {
                     <button
                       onClick={() => copyUrl(asset)}
                       className="p-2 bg-white rounded-lg hover:bg-zinc-100 transition-colors"
-                      title="Copy URL"
+                      title={asset.is_public ? 'Copy public link' : 'Copy URL (admin-only until made public)'}
                     >
                       <Copy className="h-4 w-4 text-zinc-700" />
                     </button>

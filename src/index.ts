@@ -65,30 +65,29 @@ app.get('/r2/:key{.+}', async (c) => {
   const expires = c.req.query('expires');
   const sig = c.req.query('sig');
 
+  // Assets explicitly marked public are served to anyone, with or without a signature.
+  const isPublicAsset = async () => !!(await c.env.DB.prepare(
+    'SELECT id FROM assets WHERE r2_key = ? AND is_public = 1'
+  ).bind(`assets/${key}`).first<{ id: string }>());
+
   if (expires && sig) {
-    // External access via signed URL
+    // External access via signed URL. A stale signature on a public asset is not a
+    // failure — the asset needs no signature at all — so fall back to the public check
+    // rather than 403ing a link that was handed out before the asset was made public.
     const valid = await verifyAssetSignature(`/r2/${key}`, expires, sig, c.env.JWT_SECRET);
-    if (!valid) return c.json({ error: 'Forbidden' }, 403);
+    if (!valid && !(await isPublicAsset())) return c.json({ error: 'Forbidden' }, 403);
   } else {
     // Admin UI access via session cookie
     const token = getCookie(c, 'etch_access');
     const payload = token ? await verifyJWT(token, c.env.JWT_SECRET) : null;
-    if (!payload) {
-      // Allow unauthenticated access to assets explicitly marked public
-      const publicAsset = await c.env.DB.prepare(
-        'SELECT id FROM assets WHERE r2_key = ? AND is_public = 1'
-      ).bind(`assets/${key}`).first<{ id: string }>();
-      if (publicAsset) {
-        // fall through to serve
-      } else {
-        // Allow unauthenticated access to assets used as branding — the login page
-        // needs to load the logo and favicon before the user has authenticated.
-        const branding = await c.env.DB.prepare(
-          "SELECT value FROM settings WHERE key IN ('logo_image_url', 'login_logo_image_url', 'favicon_url')"
-        ).all<{ value: string }>();
-        const isBranding = branding.results.some(row => row.value === `/r2/${key}`);
-        if (!isBranding) return c.json({ error: 'Unauthorized' }, 401);
-      }
+    if (!payload && !(await isPublicAsset())) {
+      // Allow unauthenticated access to assets used as branding — the login page
+      // needs to load the logo and favicon before the user has authenticated.
+      const branding = await c.env.DB.prepare(
+        "SELECT value FROM settings WHERE key IN ('logo_image_url', 'login_logo_image_url', 'favicon_url')"
+      ).all<{ value: string }>();
+      const isBranding = branding.results.some(row => row.value === `/r2/${key}`);
+      if (!isBranding) return c.json({ error: 'Unauthorized' }, 401);
     }
   }
 
