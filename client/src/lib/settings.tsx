@@ -10,6 +10,8 @@ export interface SiteSettings {
   accent_color: string;
   favicon_url: string;
   upload_limit_mb: string;
+  /** Read-only, from the Worker's ASSETS_HOSTNAME. Empty when no files domain is configured. */
+  assets_hostname: string;
 }
 
 const DEFAULTS: SiteSettings = {
@@ -20,6 +22,7 @@ const DEFAULTS: SiteSettings = {
   accent_color: '#4f46e5',
   favicon_url: '',
   upload_limit_mb: '50',
+  assets_hostname: '',
 };
 
 function applyFavicon(url: string) {

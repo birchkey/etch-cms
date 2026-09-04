@@ -35,6 +35,15 @@ async function getAll(db: D1Database): Promise<Record<string, string>> {
   return map;
 }
 
+// ASSETS_HOSTNAME is deployment config rather than a stored setting, but the admin UI
+// needs it to show the right public link for an asset. Every settings response carries it
+// so a PUT response can't clobber the client's copy. Safe to expose — it is a public DNS
+// name that appears in every public API response already.
+function withAssetsHostname<T extends object>(env: Env, values: T): T & { assets_hostname?: string } {
+  const assetsHost = env.ASSETS_HOSTNAME?.trim();
+  return assetsHost ? { ...values, assets_hostname: assetsHost } : values;
+}
+
 // GET /api/settings — public, branding keys only
 settings.get('/', async (c) => {
   const all = await getAll(c.env.DB);
@@ -42,12 +51,12 @@ settings.get('/', async (c) => {
   for (const key of PUBLIC_KEYS) {
     if (key in all) pub[key] = all[key];
   }
-  return c.json(pub);
+  return c.json(withAssetsHostname(c.env, pub));
 });
 
 // GET /api/settings/admin — admin only, returns all settings including JWT config
 settings.get('/admin', authMiddleware, adminOnly, async (c) => {
-  return c.json(await getAll(c.env.DB));
+  return c.json(withAssetsHostname(c.env, await getAll(c.env.DB)));
 });
 
 // PUT /api/settings — admin only
@@ -65,7 +74,7 @@ settings.put('/', authMiddleware, adminOnly, async (c) => {
     }
   }
 
-  return c.json(await getAll(c.env.DB));
+  return c.json(withAssetsHostname(c.env, await getAll(c.env.DB)));
 });
 
 export default settings;

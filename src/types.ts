@@ -6,6 +6,10 @@ export interface Env {
   JWT_SECRET: string;
   __STATIC_CONTENT: KVNamespace;
   PUBLIC_API_KEY?: string; // optional — if set, all /api/public/* requests require Authorization: Bearer <key>
+  // optional — a dedicated hostname for serving files, e.g. "files.example.org". When set,
+  // that hostname serves /r2/* only (no admin UI, no API), and the public API emits asset
+  // URLs on it. Must also be routed to this Worker; see `routes` in wrangler.toml.
+  ASSETS_HOSTNAME?: string;
 }
 
 // DB row types

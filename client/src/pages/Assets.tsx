@@ -141,7 +141,7 @@ export default function Assets() {
 
   const copyUrl = async (asset: Asset) => {
     try {
-      await navigator.clipboard.writeText(assetsApi.absoluteUrl(asset.r2_key));
+      await navigator.clipboard.writeText(assetsApi.absoluteUrl(asset.r2_key, settings.assets_hostname));
     } catch {
       toast.error('Could not copy to clipboard');
       return;

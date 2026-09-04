@@ -215,7 +215,7 @@ Signed URLs are the safe default, but they expire. That's invisible for an `<img
 
 Toggle **Public link** on the asset (in the entry editor beside the file, or in the Assets library) and Etch stops signing it — the public API returns the bare `/r2/` path, and the `/r2/` route serves it to anyone. Use it for files you'd be comfortable handing anyone the link to; leave it off for anything gated.
 
-Turning the toggle on reveals the permanent URL right below it, with buttons to copy it or open it in a new tab — that's the link to paste into a Webstudio button, an email, or a nav item.
+Turning the toggle on reveals the permanent URL right below it, with buttons to copy it or open it in a new tab — that's the link to paste into a Webstudio button, an email, or a nav item. If you've configured a [files subdomain](#7-optional-a-files-subdomain-for-public-assets), the link is built on that hostname.
 
 > **Copying a private asset's URL.** The Assets library's copy button works on private assets too, but the URL it gives you only resolves for a signed-in admin — it will load in your browser and 401 for your visitors. Etch warns you when you copy one. Turn on public access before using a link anywhere public.
 
@@ -373,6 +373,32 @@ wrangler deploy
 ```
 
 Your CMS will be live at `https://etch-cms.YOUR_SUBDOMAIN.workers.dev`.
+
+### 7. Optional: a files subdomain for public assets
+
+Public assets are served from whatever hostname runs the Worker, which means a PDF link on a client's site reads `https://your-cms-host/r2/abc.pdf`. You can serve them from a branded hostname instead — `files.example.org` — so the links you hand out are stable and on-brand, and so you could move to different storage later without breaking URLs already in the wild.
+
+**A plain CNAME will not work.** Pointing `files.example.org` at your Worker's hostname resolves to Cloudflare's edge, but Cloudflare routes by hostname and finds nothing registered for that name — you get **Error 1014 (CNAME Cross-User Banned)** if the zone is in another account, or a resolution loop if it's in yours. The hostname has to be attached to the Worker:
+
+```toml
+# wrangler.toml — for a zone in your own Cloudflare account
+routes = [
+  { pattern = "cms.example.org",   custom_domain = true },
+  { pattern = "files.example.org", custom_domain = true },
+]
+
+[vars]
+ASSETS_HOSTNAME = "files.example.org"
+```
+
+For a domain your customer controls, use **Cloudflare for SaaS** custom hostnames rather than `routes` — they CNAME to a fallback origin you own and you register the hostname via API. It's a paid add-on per hostname.
+
+`ASSETS_HOSTNAME` does two things:
+
+- **Locks the files hostname down to files.** Every route in this Worker answers on every hostname attached to it, so without this the admin UI, the login page and the full API would all be live on your client's domain. When set, that hostname serves `/r2/*` and 404s everything else.
+- **Emits asset URLs on it.** The public API normally builds asset URLs from whichever host served the request; with this set they're always `https://files.example.org/r2/...`. The admin's copy-link buttons follow suit.
+
+Signed URLs are signed over the path only, not the host, so they validate on either hostname — switching this on doesn't invalidate anything already issued. But public asset URLs already published *will* change, so pick the hostname before you start handing links out and treat it as permanent.
 
 ### Local development
 

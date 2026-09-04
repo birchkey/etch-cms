@@ -112,6 +112,15 @@ async function getAssetMeta(db: D1Database, storedPath: string): Promise<AssetMe
   return row ? { alt_text: row.alt_text, is_public: !!row.is_public } : null;
 }
 
+// Origin to build asset URLs on. Defaults to whichever host served the request, but a
+// configured ASSETS_HOSTNAME wins: asset links (public ones especially) outlive the
+// response that carried them, so they should carry the stable, branded files domain
+// rather than whichever host the frontend happened to call the API on.
+function assetBaseUrl(c: { env: Env; req: { url: string } }): string {
+  const host = c.env.ASSETS_HOSTNAME?.trim();
+  return host ? `https://${host}` : new URL(c.req.url).origin;
+}
+
 // Build the { url, alt_text } object the public API returns for one asset reference.
 //
 // Signed URLs expire after an hour, which is right for an <img> the frontend re-fetches
@@ -553,7 +562,7 @@ function buildFilterCondition(alias: string, field: FieldRow, op: string, value:
 // GET /api/public/:typeSlug
 publicApi.get('/:typeSlug', async (c) => {
   const { typeSlug } = c.req.param();
-  const baseUrl = new URL(c.req.url).origin;
+  const baseUrl = assetBaseUrl(c);
 
   const ct = await c.env.DB.prepare(
     'SELECT * FROM content_types WHERE slug = ?'
@@ -727,7 +736,7 @@ publicApi.get('/:typeSlug', async (c) => {
 // Declared before /:typeSlug/:id so "first" is never treated as an entry ID.
 publicApi.get('/:typeSlug/first', async (c) => {
   const { typeSlug } = c.req.param();
-  const baseUrl = new URL(c.req.url).origin;
+  const baseUrl = assetBaseUrl(c);
 
   const ct = await c.env.DB.prepare(
     'SELECT * FROM content_types WHERE slug = ?'
@@ -767,7 +776,7 @@ publicApi.get('/:typeSlug/first', async (c) => {
 // Declared before /:typeSlug/:id so "random" is never treated as an entry ID.
 publicApi.get('/:typeSlug/random', async (c) => {
   const { typeSlug } = c.req.param();
-  const baseUrl = new URL(c.req.url).origin;
+  const baseUrl = assetBaseUrl(c);
 
   const ct = await c.env.DB.prepare(
     'SELECT * FROM content_types WHERE slug = ?'
@@ -807,7 +816,7 @@ publicApi.get('/:typeSlug/random', async (c) => {
 // GET /api/public/:typeSlug/:id
 publicApi.get('/:typeSlug/:id', async (c) => {
   const { typeSlug, id } = c.req.param();
-  const baseUrl = new URL(c.req.url).origin;
+  const baseUrl = assetBaseUrl(c);
 
   const ct = await c.env.DB.prepare(
     'SELECT * FROM content_types WHERE slug = ?'

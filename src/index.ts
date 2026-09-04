@@ -44,6 +44,19 @@ app.use('*', async (c, next) => {
   c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 });
 
+// The assets hostname is a files-only front door. Everything this Worker serves is
+// reachable on any hostname routed to it, so without this guard pointing a customer's
+// files.<domain> at the Worker would also publish the admin UI, the login page and the
+// whole API on that domain. Serve /r2/* there and nothing else.
+// Registered after the security headers so the 404 carries them too.
+app.use('*', async (c, next) => {
+  const assetsHost = c.env.ASSETS_HOSTNAME?.trim();
+  if (assetsHost && new URL(c.req.url).hostname === assetsHost && !c.req.path.startsWith('/r2/')) {
+    return c.notFound();
+  }
+  return next();
+});
+
 // API routes
 app.route('/api/auth', authRoutes);
 app.route('/api/content-types', contentTypeRoutes);

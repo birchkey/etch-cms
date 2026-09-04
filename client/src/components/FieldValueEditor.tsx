@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Image as ImageIcon, X, Plus, ExternalLink, FileText, Film, File, GripVertical, ChevronDown, Clock, Loader2, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useSettings } from '@/lib/settings';
 import type { FaIconMeta } from '@/lib/fa-icons';
 
 function assetTypeFromUrl(url: string): 'image' | 'video' | 'pdf' | 'file' {
@@ -106,6 +107,7 @@ function useAssetName(url: string | null): string | null {
 // shared asset record, so an edit here is the same edit the asset library would make.
 function AssetMetaEditor({ url, compact = false }: { url: string; compact?: boolean }) {
   const [asset, updateAsset] = useAsset(url);
+  const assetsHostname = useSettings().settings.assets_hostname;
   // null means "not being edited" — the input then shows the stored value, so an edit
   // made to the same asset elsewhere on the page appears here too.
   const [draft, setDraft] = useState<string | null>(null);
@@ -149,7 +151,7 @@ function AssetMetaEditor({ url, compact = false }: { url: string; compact?: bool
     }
   };
 
-  const publicUrl = assetsApi.absoluteUrl(asset.r2_key);
+  const publicUrl = assetsApi.absoluteUrl(asset.r2_key, assetsHostname);
 
   const copyPublicUrl = async () => {
     try {
