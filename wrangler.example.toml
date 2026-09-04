@@ -20,3 +20,19 @@ bucket_name = "your-r2-bucket-name" # wrangler r2 bucket create your-r2-bucket-n
 
 [vars]
 ENVIRONMENT = "production"
+
+# Optional: a dedicated hostname for serving files, e.g. "files.example.org".
+# When set, that hostname serves /r2/* only (no admin UI, no API), and the public API
+# returns asset URLs on it instead of on whichever host served the request.
+# The hostname must also be routed to this Worker — uncomment the `routes` block below.
+# Changing it changes the URLs already published for public assets, so treat it as permanent.
+# ASSETS_HOSTNAME = "files.example.org"
+
+# Attach hostnames to this Worker. A plain CNAME pointing at the Worker's own hostname does
+# not work — Cloudflare routes by hostname, so the name has to be registered here (or as a
+# Custom Domain in the dashboard). For domains you don't control, use Cloudflare for SaaS
+# custom hostnames instead.
+# routes = [
+#   { pattern = "cms.example.org", custom_domain = true },
+#   { pattern = "files.example.org", custom_domain = true },
+# ]
