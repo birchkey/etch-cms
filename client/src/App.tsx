@@ -52,6 +52,8 @@ function AppRoutes() {
         <Route path="/content-types/:typeId/entries" element={<EntryList />} />
         <Route path="/content-types/:typeId/entries/new" element={<EntryForm />} />
         <Route path="/content-types/:typeId/entries/:entryId" element={<EntryForm />} />
+        {/* Globals — single-entry content types edited in place, no entry list */}
+        <Route path="/globals/:typeId" element={<EntryForm singleton />} />
         <Route path="/assets" element={<Assets />} />
         <Route path="/users" element={<RequireAdmin><Users /></RequireAdmin>} />
         <Route path="/settings" element={<RequireAdmin><Settings /></RequireAdmin>} />

@@ -15,6 +15,7 @@ export interface ContentTypeRow {
   slug: string;
   description: string | null;
   preview_url: string | null;
+  is_singleton: number; // 0 or 1 — a singleton holds exactly one entry (a "global")
   created_at: number;
   updated_at: number;
 }

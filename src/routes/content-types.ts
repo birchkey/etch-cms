@@ -4,6 +4,7 @@ import { authMiddleware, adminOnly } from '../middleware/auth';
 import { generateId, isSafeRegex, parseFieldValue, slugify, slugifyUnderscore } from '../lib/utils';
 import { logAudit } from '../lib/audit';
 import { getPermittedContentTypeIds, isPermitted } from '../lib/permissions';
+import { getEntryWithFields } from './entries';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate';
 
@@ -33,6 +34,7 @@ const CreateContentTypeSchema = z.object({
   slug: z.string().optional(),
   description: z.string().optional(),
   preview_url: z.string().nullable().optional(),
+  is_singleton: z.boolean().optional(),
   fields: z.array(FieldSchema).optional(),
 });
 const UpdateContentTypeSchema = z.object({
@@ -40,6 +42,7 @@ const UpdateContentTypeSchema = z.object({
   slug: z.string().optional(),
   description: z.string().optional(),
   preview_url: z.string().nullable().optional(),
+  is_singleton: z.boolean().optional(),
   fields: z.array(FieldSchema).optional(),
 });
 const ReorderSchema = z.object({ ids: z.array(z.string()).min(1, 'ids must be a non-empty array') });
@@ -85,8 +88,8 @@ contentTypes.post('/', async (c) => {
   const now = Date.now();
 
   await c.env.DB.prepare(
-    'INSERT INTO content_types (id, name, slug, description, preview_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(id, body.name, slug, body.description ?? null, body.preview_url ?? null, now, now).run();
+    'INSERT INTO content_types (id, name, slug, description, preview_url, is_singleton, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(id, body.name, slug, body.description ?? null, body.preview_url ?? null, body.is_singleton ? 1 : 0, now, now).run();
 
   // Insert fields if provided
   if (body.fields?.length) {
@@ -179,6 +182,42 @@ contentTypes.get('/:id/entries/select', async (c) => {
   return c.json(result);
 });
 
+// GET /api/content-types/:typeId/singleton
+// Resolves the one entry belonging to a singleton content type, provisioning it on first
+// access. The entry is created already published — an empty global is a far less alarming
+// failure for a frontend than a 404 on a site-wide fetch. Required-field validation is
+// deliberately skipped here; it still applies to every later publish.
+contentTypes.get('/:typeId/singleton', async (c) => {
+  const { typeId } = c.req.param();
+  const ct = await c.env.DB.prepare('SELECT * FROM content_types WHERE id = ?').bind(typeId).first<ContentTypeRow>();
+  if (!ct) return c.json({ error: 'Not found' }, 404);
+  if (!ct.is_singleton) return c.json({ error: 'Not a single-entry content type' }, 400);
+  const permitted = await getPermittedContentTypeIds(c.env.DB, c.get('jwtPayload') as JWTPayload);
+  if (!isPermitted(permitted, typeId)) return c.json({ error: 'Forbidden' }, 403);
+
+  const id = generateId();
+  const now = Date.now();
+
+  // Guarded INSERT ... SELECT so two concurrent first-visits cannot both provision an
+  // entry — SQLite evaluates the NOT EXISTS within the same statement.
+  await c.env.DB.prepare(
+    `INSERT INTO entries (id, content_type_id, slug, status, has_unpublished_changes, sort_order, created_at, updated_at, published_at)
+     SELECT ?, ?, NULL, 'published', 0, 0, ?, ?, ?
+     WHERE NOT EXISTS (SELECT 1 FROM entries WHERE content_type_id = ?)`
+  ).bind(id, typeId, now, now, now, typeId).run();
+
+  const row = await c.env.DB.prepare(
+    'SELECT id FROM entries WHERE content_type_id = ? ORDER BY created_at ASC LIMIT 1'
+  ).bind(typeId).first<{ id: string }>();
+  if (!row) return c.json({ error: 'Failed to provision entry' }, 500);
+
+  const created = row.id === id;
+  if (created) {
+    void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'entry.create', 'entry', id, ct.name, { content_type_id: typeId, singleton: true }).catch(() => {});
+  }
+  return c.json(await getEntryWithFields(c.env.DB, row.id), created ? 201 : 200);
+});
+
 // PUT /api/content-types/:id
 contentTypes.put('/:id', async (c) => {
   const { id } = c.req.param();
@@ -195,10 +234,22 @@ contentTypes.put('/:id', async (c) => {
   const slug = body.slug ?? ct.slug;
   const description = body.description !== undefined ? body.description : ct.description;
   const preview_url = body.preview_url !== undefined ? body.preview_url : ct.preview_url;
+  const is_singleton = body.is_singleton !== undefined ? (body.is_singleton ? 1 : 0) : ct.is_singleton;
+
+  // A singleton holds exactly one entry, so it can only be turned on when the type has
+  // at most one entry — otherwise we'd silently orphan the rest.
+  if (is_singleton === 1 && ct.is_singleton === 0) {
+    const countRow = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM entries WHERE content_type_id = ?'
+    ).bind(id).first<{ count: number }>();
+    if ((countRow?.count ?? 0) > 1) {
+      return c.json({ error: `Cannot make "${ct.name}" a single-entry type — it has ${countRow!.count} entries. Delete all but one first.` }, 400);
+    }
+  }
 
   await c.env.DB.prepare(
-    'UPDATE content_types SET name = ?, slug = ?, description = ?, preview_url = ?, updated_at = ? WHERE id = ?'
-  ).bind(name, slug, description, preview_url, now, id).run();
+    'UPDATE content_types SET name = ?, slug = ?, description = ?, preview_url = ?, is_singleton = ?, updated_at = ? WHERE id = ?'
+  ).bind(name, slug, description, preview_url, is_singleton, now, id).run();
 
   // Diff fields to preserve entry_fields data for existing fields
   if (body.fields !== undefined) {

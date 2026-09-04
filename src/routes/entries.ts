@@ -74,7 +74,7 @@ function serializeFieldValue(value: unknown, type: string): string | null {
 // Admin always sees the latest values:
 // - published + has_unpublished_changes → read from entry_fields_draft
 // - otherwise → read from entry_fields (live)
-async function getEntryWithFields(db: D1Database, entryId: string) {
+export async function getEntryWithFields(db: D1Database, entryId: string) {
   const entry = await db.prepare('SELECT * FROM entries WHERE id = ?').bind(entryId).first<EntryRow>();
   if (!entry) return null;
 
@@ -94,6 +94,17 @@ async function getEntryWithFields(db: D1Database, entryId: string) {
   }
 
   return { ...entry, fields: fieldValues, fieldDefs: fields.results };
+}
+
+// Singletons hold exactly one always-published entry. The UI hides the actions that would
+// break that invariant, but the API has to enforce it too — otherwise a direct call could
+// leave a global missing or unreadable from the public API.
+async function isSingletonType(db: D1Database, contentTypeId: string): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT is_singleton FROM content_types WHERE id = ?')
+    .bind(contentTypeId)
+    .first<{ is_singleton: number }>();
+  return !!row?.is_singleton;
 }
 
 // GET /api/entries/count
@@ -277,10 +288,14 @@ entries.post('/', async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const body = parsed.data;
 
-  const ct = await c.env.DB.prepare('SELECT id FROM content_types WHERE id = ?').bind(body.content_type_id).first();
+  const ct = await c.env.DB.prepare('SELECT id, is_singleton FROM content_types WHERE id = ?').bind(body.content_type_id).first<{ id: string; is_singleton: number }>();
   if (!ct) return c.json({ error: 'Content type not found' }, 404);
   const permitted = await getPermittedContentTypeIds(c.env.DB, c.get('jwtPayload') as JWTPayload);
   if (!isPermitted(permitted, body.content_type_id)) return c.json({ error: 'Forbidden' }, 403);
+
+  if (ct.is_singleton) {
+    return c.json({ error: 'This is a single-entry content type — use GET /api/content-types/:typeId/singleton to open its entry' }, 409);
+  }
 
   const slug = body.slug ? slugify(body.slug) || null : null;
   if (slug) {
@@ -328,6 +343,9 @@ entries.post('/:id/duplicate', async (c) => {
   if (!source) return c.json({ error: 'Not found' }, 404);
   const dupPermitted = await getPermittedContentTypeIds(c.env.DB, c.get('jwtPayload') as JWTPayload);
   if (!isPermitted(dupPermitted, source.content_type_id)) return c.json({ error: 'Forbidden' }, 403);
+  if (await isSingletonType(c.env.DB, source.content_type_id)) {
+    return c.json({ error: 'Single-entry content types cannot be duplicated' }, 409);
+  }
 
   const newId = generateId();
   const now = Date.now();
@@ -582,6 +600,13 @@ entries.patch('/:id/unpublish', async (c) => {
   if (!entry) return c.json({ error: 'Not found' }, 404);
   const unpubPermitted = await getPermittedContentTypeIds(c.env.DB, c.get('jwtPayload') as JWTPayload);
   if (!isPermitted(unpubPermitted, entry.content_type_id)) return c.json({ error: 'Forbidden' }, 403);
+  // Blocking unpublish is what keeps a singleton permanently published: it is provisioned
+  // as published and can never leave that state, so /api/public/:slug/first never 404s.
+  // This also makes scheduling unreachable for singletons — schedule already rejects
+  // published entries.
+  if (await isSingletonType(c.env.DB, entry.content_type_id)) {
+    return c.json({ error: 'Single-entry content types are always published' }, 409);
+  }
 
   const now = Date.now();
 
@@ -682,6 +707,9 @@ entries.delete('/:id', async (c) => {
   if (!entry) return c.json({ error: 'Not found' }, 404);
   const delPermitted = await getPermittedContentTypeIds(c.env.DB, c.get('jwtPayload') as JWTPayload);
   if (!isPermitted(delPermitted, entry.content_type_id)) return c.json({ error: 'Forbidden' }, 403);
+  if (await isSingletonType(c.env.DB, entry.content_type_id)) {
+    return c.json({ error: 'Single-entry content types cannot be deleted — delete the content type instead' }, 409);
+  }
 
   await c.env.DB.prepare('DELETE FROM entries WHERE id = ?').bind(id).run();
 

@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   FileText,
   Image,
+  Globe,
   ChevronDown,
   LogOut,
   Database,
@@ -30,11 +31,17 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const { settings } = useSettings();
   const [contentTypes, setContentTypes] = useState<ContentType[]>([]);
   const [ctOpen, setCtOpen] = useState(true);
+  const [globalsOpen, setGlobalsOpen] = useState(true);
   const [changePwOpen, setChangePwOpen] = useState(false);
 
   useEffect(() => {
     contentTypesApi.list().then(setContentTypes).catch(() => {});
   }, [location.pathname]);
+
+  // Singletons ("globals") get their own section and link straight to their editor —
+  // there is no entry list to browse.
+  const collections = contentTypes.filter(ct => !ct.is_singleton);
+  const globals = contentTypes.filter(ct => ct.is_singleton);
 
   const navItem = (to: string, icon: React.ReactNode, label: string) => (
     <Link
@@ -97,7 +104,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           {ctOpen && (
             <div className="mt-1 space-y-0.5">
               {isAdmin && navItem('/content-types', <FileText className="h-4 w-4" />, 'Collections')}
-              {contentTypes.map(ct => (
+              {collections.map(ct => (
                 <Link
                   key={ct.id}
                   to={`/content-types/${ct.id}/entries`}
@@ -117,6 +124,40 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             </div>
           )}
         </div>
+
+        {/* Globals section — single-entry content types */}
+        {globals.length > 0 && (
+          <div className="pt-2">
+            <button
+              onClick={() => setGlobalsOpen(o => !o)}
+              className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-400"
+            >
+              <span>Globals</span>
+              <ChevronDown className={cn('h-3 w-3 transition-transform', globalsOpen && 'rotate-180')} />
+            </button>
+
+            {globalsOpen && (
+              <div className="mt-1 space-y-0.5">
+                {globals.map(ct => (
+                  <Link
+                    key={ct.id}
+                    to={`/globals/${ct.id}`}
+                    onClick={() => onClose?.()}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors',
+                      location.pathname === `/globals/${ct.id}`
+                        ? 'bg-zinc-700 text-white'
+                        : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+                    )}
+                  >
+                    <Globe className="h-3.5 w-3.5 shrink-0" />
+                    {ct.name}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {navItem('/assets', <Image className="h-4 w-4" />, 'Assets')}
         {isAdmin && navItem('/users', <Users className="h-4 w-4" />, 'Users')}

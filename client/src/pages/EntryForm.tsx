@@ -15,13 +15,19 @@ import { usePageTitle } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 import { settingsApi } from '@/lib/api';
 
-export default function EntryForm() {
+interface EntryFormProps {
+  /** Singleton ("global") mode: the one entry is resolved from the content type, not the URL. */
+  singleton?: boolean;
+}
+
+export default function EntryForm({ singleton = false }: EntryFormProps) {
   const { typeId, entryId } = useParams<{ typeId: string; entryId: string }>();
   const navigate = useNavigate();
-  const isNew = !entryId || entryId === 'new';
+  // A singleton's entry always exists — it is provisioned on first access.
+  const isNew = !singleton && (!entryId || entryId === 'new');
 
   const [contentType, setContentType] = useState<ContentType | null>(null);
-  usePageTitle(contentType ? (isNew ? `New ${contentType.name}` : `Edit ${contentType.name}`) : '');
+  usePageTitle(contentType ? (singleton ? contentType.name : isNew ? `New ${contentType.name}` : `Edit ${contentType.name}`) : '');
   const [entry, setEntry] = useState<Entry | null>(null);
   const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({});
   const [slug, setSlug] = useState('');
@@ -64,8 +70,13 @@ export default function EntryForm() {
       const providerLabels: Record<string, string> = { clerk: 'Clerk', auth0: 'Auth0', supabase: 'Supabase', firebase: 'Firebase Auth', custom: 'Auth Service' };
       setJwtProviderName(adminSettings?.jwt_provider ? (providerLabels[adminSettings.jwt_provider] ?? null) : null);
 
-      if (!isNew && entryId) {
-        const e = await entriesApi.get(entryId);
+      if (singleton || (!isNew && entryId)) {
+        // Slug and protection are still loaded (and round-tripped on save) even though
+        // singletons don't render those controls — otherwise auto-save would wipe values
+        // set before the type was converted to a singleton.
+        const e = singleton
+          ? await contentTypesApi.getSingleton(typeId)
+          : await entriesApi.get(entryId!);
         setEntry(e);
         setFieldValues(e.fields);
         if (e.slug) {
@@ -84,7 +95,7 @@ export default function EntryForm() {
     loadData()
       .catch(() => toast.error('Failed to load'))
       .finally(() => setLoading(false));
-  }, [typeId, entryId, isNew]);
+  }, [typeId, entryId, isNew, singleton]);
 
   useEffect(() => { slugRef.current = slug; }, [slug]);
   useEffect(() => { protectionTypeRef.current = protectionType; }, [protectionType]);
@@ -126,7 +137,7 @@ export default function EntryForm() {
         });
       }
 
-      if (!slugManual && typeof value === 'string') {
+      if (!singleton && !slugManual && typeof value === 'string') {
         const firstTextField = contentType?.fields?.find(f => f.type === 'text');
         if (firstTextField && fieldSlug === firstTextField.slug) {
           const suggested = slugify(value);
@@ -152,7 +163,7 @@ export default function EntryForm() {
       }
       return next;
     });
-  }, [isNew, entry, slugManual, contentType]);
+  }, [isNew, entry, slugManual, contentType, singleton]);
 
   const validateField = (field: Field, value: unknown): string | null => {
     if (value === null || value === undefined || value === '') return null;
@@ -389,16 +400,16 @@ export default function EntryForm() {
     <div className="flex flex-col min-h-screen">
       {/* Sticky toolbar */}
       <div className="sticky top-14 md:top-0 z-30 bg-white border-b border-zinc-200 px-3 md:px-6 py-2 md:py-3 flex items-center gap-2 md:gap-4">
-        <Link to={`/content-types/${typeId}/entries`}>
+        <Link to={singleton ? '/' : `/content-types/${typeId}/entries`}>
           <Button variant="ghost" size="icon">
             <ChevronLeft className="h-5 w-5" />
           </Button>
         </Link>
         <div className="flex-1 min-w-0">
-          <p className="text-xs text-zinc-400 truncate">{contentType?.name}</p>
+          <p className="text-xs text-zinc-400 truncate">{singleton ? 'Globals' : contentType?.name}</p>
           <div className="flex items-center gap-2">
             <p className="text-sm font-semibold text-zinc-900 truncate">
-              {isNew ? 'New Entry' : 'Edit Entry'}
+              {singleton ? contentType?.name : isNew ? 'New Entry' : 'Edit Entry'}
             </p>
             {!isNew && entry && (
               <span className="md:hidden shrink-0">
@@ -492,7 +503,8 @@ export default function EntryForm() {
             }
             {isNew ? 'Create' : 'Save'}
           </Button>
-          {!isNew && entry && (
+          {/* Singletons have no unpublish / duplicate / delete — the entry is permanent */}
+          {!isNew && !singleton && entry && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
@@ -557,24 +569,28 @@ export default function EntryForm() {
                 <DropdownMenuItem onClick={handleCopyPreviewLink} disabled={copyingPreview}>
                   <Link2 className="h-4 w-4 mr-2" /> Preview Link
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                {isPublished && (
-                  <DropdownMenuItem onClick={handleUnpublish} disabled={publishing}>
-                    <EyeOff className="h-4 w-4 mr-2" /> Unpublish
-                  </DropdownMenuItem>
+                {!singleton && (
+                  <>
+                    <DropdownMenuSeparator />
+                    {isPublished && (
+                      <DropdownMenuItem onClick={handleUnpublish} disabled={publishing}>
+                        <EyeOff className="h-4 w-4 mr-2" /> Unpublish
+                      </DropdownMenuItem>
+                    )}
+                    {isScheduled && (
+                      <DropdownMenuItem onClick={handleUnschedule} disabled={publishing}>
+                        <X className="h-4 w-4 mr-2" /> Unschedule
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={handleDuplicate} disabled={duplicating}>
+                      <Copy className="h-4 w-4 mr-2" /> Duplicate
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)} className="text-red-600 focus:text-red-600">
+                      <Trash2 className="h-4 w-4 mr-2" /> Delete
+                    </DropdownMenuItem>
+                  </>
                 )}
-                {isScheduled && (
-                  <DropdownMenuItem onClick={handleUnschedule} disabled={publishing}>
-                    <X className="h-4 w-4 mr-2" /> Unschedule
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={handleDuplicate} disabled={duplicating}>
-                  <Copy className="h-4 w-4 mr-2" /> Duplicate
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)} className="text-red-600 focus:text-red-600">
-                  <Trash2 className="h-4 w-4 mr-2" /> Delete
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -595,7 +611,8 @@ export default function EntryForm() {
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Slug */}
+            {/* Slug — globals are fetched by content-type slug, so they have no entry URL */}
+            {!singleton && (
             <div className="bg-white rounded-xl border border-zinc-200 p-5 space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-sm font-medium text-zinc-800">Page URL</Label>
@@ -623,8 +640,11 @@ export default function EntryForm() {
                 The URL-friendly identifier for this entry. Auto-generated from the title — leave blank to use a default.
               </p>
             </div>
+            )}
 
-            {/* Content Protection */}
+            {/* Content Protection — a protected global would be invisible to the public
+                API, silently breaking every page that reads it, so globals can't set it */}
+            {!singleton && (
             <div className="bg-white rounded-xl border border-zinc-200 p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Label className="text-sm font-medium text-zinc-800">Content Protection</Label>
@@ -716,6 +736,7 @@ export default function EntryForm() {
                 </div>
               )}
             </div>
+            )}
 
             {fields.map(field => {
               const fieldError = fieldErrors[field.slug];

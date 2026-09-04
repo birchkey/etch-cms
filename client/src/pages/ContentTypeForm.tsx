@@ -106,6 +106,7 @@ export default function ContentTypeForm() {
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
+  const [isSingleton, setIsSingleton] = useState(false);
   const [fields, setFields] = useState<FieldDraft[]>([]);
   const [allContentTypes, setAllContentTypes] = useState<ContentType[]>([]);
   const [saving, setSaving] = useState(false);
@@ -126,6 +127,7 @@ export default function ContentTypeForm() {
           setSlug(ct.slug);
           setDescription(ct.description ?? '');
           setPreviewUrl(ct.preview_url ?? '');
+          setIsSingleton(ct.is_singleton === 1);
           setSlugManual(true);
           setFields((ct.fields ?? []).map((f, i) => ({
             ...f,
@@ -258,11 +260,11 @@ export default function ContentTypeForm() {
 
     try {
       if (isNew) {
-        const ct = await contentTypesApi.create({ name, slug, description, preview_url: previewUrl || null, fields: fieldData });
+        const ct = await contentTypesApi.create({ name, slug, description, preview_url: previewUrl || null, is_singleton: isSingleton, fields: fieldData });
         toast.success('Created!');
         navigate(`/content-types/${ct.id}`);
       } else {
-        await contentTypesApi.update(id!, { name, slug, description, preview_url: previewUrl || null, fields: fieldData });
+        await contentTypesApi.update(id!, { name, slug, description, preview_url: previewUrl || null, is_singleton: isSingleton, fields: fieldData });
         toast.success('Saved!');
       }
     } catch (err) {
@@ -307,7 +309,20 @@ export default function ContentTypeForm() {
               placeholder="blog-post"
               className="font-mono text-sm"
             />
-            <p className="text-xs text-zinc-400">Used in API: /api/public/{slug || 'slug'}</p>
+            <p className="text-xs text-zinc-400">
+              Used in API: /api/public/{slug || 'slug'}{isSingleton ? '/first' : ''}
+            </p>
+          </div>
+
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-zinc-200 p-3">
+            <div className="space-y-0.5">
+              <Label>Single entry (global)</Label>
+              <p className="text-xs text-zinc-400">
+                Holds one set of values instead of a list — for site-wide content like contact
+                details or social links. Appears under Globals in the sidebar and is always published.
+              </p>
+            </div>
+            <Switch checked={isSingleton} onCheckedChange={setIsSingleton} />
           </div>
           <div className="space-y-1.5">
             <Label>Description</Label>

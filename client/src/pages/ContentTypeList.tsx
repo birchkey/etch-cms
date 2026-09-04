@@ -69,7 +69,14 @@ export default function ContentTypeList() {
           {contentTypes.map(ct => (
             <div key={ct.id} className="flex items-center gap-4 px-5 py-4 hover:bg-zinc-50 transition-colors group">
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-zinc-900">{ct.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-zinc-900">{ct.name}</p>
+                  {ct.is_singleton === 1 && (
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5">
+                      Global
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-zinc-400 font-mono">{ct.slug}</p>
                 {ct.description && (
                   <p className="text-xs text-zinc-500 mt-0.5 truncate">{ct.description}</p>
@@ -94,7 +101,10 @@ export default function ContentTypeList() {
                   }
                 </Button>
               </div>
-              <Link to={`/content-types/${ct.id}/entries`} title="View entries">
+              <Link
+                to={ct.is_singleton === 1 ? `/globals/${ct.id}` : `/content-types/${ct.id}/entries`}
+                title={ct.is_singleton === 1 ? 'Edit global' : 'View entries'}
+              >
                 <Button variant="ghost" size="icon">
                   <ArrowRight className="h-4 w-4 text-zinc-400" />
                 </Button>

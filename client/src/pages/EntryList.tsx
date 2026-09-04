@@ -129,13 +129,18 @@ export default function EntryList() {
       contentTypesApi.listEntries(typeId, { page, limit: PAGE_SIZE, status: statusFilter || undefined, sort_by: sortBy, sort_dir: sortDir, q: debouncedSearch || undefined }),
     ])
       .then(([ct, res]) => {
+        // Singletons have no list view — send direct navigations to the global's editor
+        if (ct.is_singleton) {
+          navigate(`/globals/${typeId}`, { replace: true });
+          return;
+        }
         setContentType(ct);
         setEntries(res.data);
         setMeta(res.meta);
       })
       .catch(() => toast.error('Failed to load'))
       .finally(() => setLoading(false));
-  }, [typeId, page, statusFilter, sortBy, sortDir, debouncedSearch, refreshKey]);
+  }, [typeId, page, statusFilter, sortBy, sortDir, debouncedSearch, refreshKey, navigate]);
 
   const handleDuplicate = async (entry: Entry) => {
     try {

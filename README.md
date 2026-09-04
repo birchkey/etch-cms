@@ -24,6 +24,7 @@ The result is a CMS that's effectively free to run at low-to-moderate traffic, g
 ## Features
 
 - **Custom content types** — define schemas with any combination of field types
+- **Globals** — mark any content type "single entry" to get one always-published set of values (contact details, social links, SEO defaults) instead of a list
 - **11 field types** — text, rich text, email, phone, image (single or multiple), number, datetime, boolean, relation (one-to-many), select, color
 - **Draft / Published / Scheduled** workflow — published entries track unpublished edits separately so you can stage changes without taking content offline
 - **Asset management** — upload images (JPEG, PNG, WebP, GIF, AVIF, SVG), PDFs, and video (MP4, WebM) to R2 with alt text support; magic-byte validation prevents MIME spoofing
@@ -161,6 +162,31 @@ GET https://your-worker.workers.dev/api/public/blog-posts/random
 ```
 
 Useful for "featured post" or "quote of the day" components.
+
+### Fetch a global
+
+Content types marked **Single entry** in the admin UI hold exactly one set of values. Fetch them with `/first`, which returns a bare object rather than a paginated list:
+
+```
+GET https://your-worker.workers.dev/api/public/site-contact/first
+```
+
+```json
+{
+  "data": {
+    "id": "01j...",
+    "fields": {
+      "email": "hello@example.com",
+      "phone": "+1 555 0100",
+      "address": "123 Main St"
+    }
+  }
+}
+```
+
+Bind this to a Webstudio Resource once and reference it from your header, footer, and contact page. Globals are provisioned already published, so this endpoint never 404s once the content type exists — an unfilled global returns `null` fields rather than an error.
+
+Create as many globals as you have distinct concerns (Contact Info, Social Links, SEO Defaults, Footer) — separate types keep each payload small and let you grant editors access per-global. `GET /api/public/:typeSlug` still works on a global and returns a one-item list, so nothing breaks if you convert an existing single-entry collection.
 
 ### Trigger a Webstudio rebuild on publish
 
@@ -361,6 +387,7 @@ All `/api/public/` endpoints are unauthenticated and CORS-enabled for cross-orig
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/public/:typeSlug` | List published entries (paginated) |
+| `GET` | `/api/public/:typeSlug/first` | Get the first published entry as a bare object — use this for globals |
 | `GET` | `/api/public/:typeSlug/random` | Get one random published entry |
 | `GET` | `/api/public/:typeSlug/:idOrSlug` | Get a single entry by UUID or slug |
 | `GET` | `/api/public/:typeSlug/:slug?preview=<token>` | Get a draft entry via preview token |
@@ -384,6 +411,7 @@ POST   /api/content-types                          (admin)
 GET    /api/content-types/:id
 PUT    /api/content-types/:id                      (admin)
 DELETE /api/content-types/:id                      (admin)
+GET    /api/content-types/:typeId/singleton        (resolves/provisions a global's entry)
 GET    /api/content-types/:typeId/entries
 GET    /api/content-types/:typeId/entries/select
 PATCH  /api/content-types/:typeId/entries/reorder  (admin)

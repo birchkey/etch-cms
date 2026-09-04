@@ -179,6 +179,7 @@ export interface ContentType {
   slug: string;
   description: string | null;
   preview_url: string | null;
+  is_singleton: number; // 0 or 1 — a singleton holds exactly one entry (a "global")
   created_at: number;
   updated_at: number;
   fields?: Field[];
@@ -209,11 +210,13 @@ export interface FieldInput {
 export const contentTypesApi = {
   list: () => request<ContentType[]>('/content-types'),
   get: (id: string) => request<ContentType>(`/content-types/${id}`),
-  create: (data: { name: string; slug?: string; description?: string; preview_url?: string | null; fields?: FieldInput[] }) =>
+  create: (data: { name: string; slug?: string; description?: string; preview_url?: string | null; is_singleton?: boolean; fields?: FieldInput[] }) =>
     request<ContentType>('/content-types', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { name?: string; slug?: string; description?: string; preview_url?: string | null; fields?: FieldInput[] }) =>
+  update: (id: string, data: { name?: string; slug?: string; description?: string; preview_url?: string | null; is_singleton?: boolean; fields?: FieldInput[] }) =>
     request<ContentType>(`/content-types/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request<{ ok: true }>(`/content-types/${id}`, { method: 'DELETE' }),
+  // Resolves the single entry of a singleton content type, provisioning it on first access.
+  getSingleton: (typeId: string) => request<Entry>(`/content-types/${typeId}/singleton`),
   slugSuggest: (typeId: string, slug: string, exclude?: string) => {
     const params = new URLSearchParams({ slug });
     if (exclude) params.set('exclude', exclude);
