@@ -117,11 +117,15 @@ app.get('/r2/:key{.+}', async (c) => {
   return new Response(object.body, { headers });
 });
 
+// client/index.html pulls Inter from Google Fonts, so the stylesheet host and the font host
+// it references both have to be allowed — without them the UI silently falls back to a
+// system font. Everything else the SPA loads (JS, CSS, API calls) is same-origin.
+const SPA_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'";
+
 // Serve static assets (React SPA)
 app.get('*', async (c) => {
-  c.header('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'");
   try {
-    return await getAssetFromKV(
+    const asset = await getAssetFromKV(
       {
         request: c.req.raw,
         waitUntil: (p: Promise<unknown>) => c.executionCtx.waitUntil(p),
@@ -139,8 +143,15 @@ app.get('*', async (c) => {
         },
       }
     );
+    // getAssetFromKV builds its own Response, and Hono only merges headers set via
+    // c.header() into responses it constructs itself — set there, the CSP is silently
+    // dropped. Copy the response so the header lands on what we actually return.
+    const res = new Response(asset.body, asset);
+    res.headers.set('content-security-policy', SPA_CSP);
+    return res;
   } catch {
     // If assets aren't built yet, return a placeholder
+    c.header('content-security-policy', SPA_CSP);
     return c.html(`<!DOCTYPE html>
 <html>
 <head><title>Etch CMS</title></head>

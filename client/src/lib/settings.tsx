@@ -43,6 +43,20 @@ function applyFavicon(url: string) {
   el.href = `${url}?t=${Date.now()}`;
 }
 
+async function fetchSettings(signal?: AbortSignal): Promise<Partial<SiteSettings>> {
+  const res = await fetch('/api/settings', { signal });
+  if (!res.ok) throw new Error(`GET /api/settings failed: ${res.status}`);
+  return await res.json() as Partial<SiteSettings>;
+}
+
+// Branding is fetched once on mount and never re-requested, so a single transient failure
+// used to leave the user looking at the default name, favicon and colors for the rest of the
+// page load — only a manual refresh recovered it. Retry on a short backoff instead, so the
+// page corrects itself within a few seconds.
+const RETRY_DELAYS_MS = [400, 1200, 3000, 8000];
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 interface SettingsContextValue {
   settings: SiteSettings;
   refresh: () => Promise<void>;
@@ -65,12 +79,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/settings');
-      if (!res.ok) return;
-      const data = await res.json() as Partial<SiteSettings>;
-      apply({ ...DEFAULTS, ...data });
+      apply({ ...DEFAULTS, ...await fetchSettings() });
     } catch {
-      // silently fail — defaults remain
+      // Caller-initiated refresh of already-applied branding — keep what's on screen.
     }
   }, [apply]);
 
@@ -80,10 +91,22 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then(res => res.ok ? res.json() as Promise<Partial<SiteSettings>> : Promise.reject())
-      .then(data => apply({ ...DEFAULTS, ...data }))
-      .catch(() => {});
+    const controller = new AbortController();
+
+    (async () => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const data = await fetchSettings(controller.signal);
+          apply({ ...DEFAULTS, ...data });
+          return;
+        } catch {
+          if (controller.signal.aborted || attempt >= RETRY_DELAYS_MS.length) return;
+          await sleep(RETRY_DELAYS_MS[attempt]);
+        }
+      }
+    })();
+
+    return () => controller.abort();
   }, [apply]);
 
   return (
