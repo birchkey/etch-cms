@@ -5,6 +5,13 @@ compatibility_date = "2024-11-01"
 [triggers]
 crons = ["* * * * *"]
 
+# Workers Logs. Off by default on a new Worker, so without this block a request that fails
+# in production leaves no trace — you have to catch it live with `wrangler tail`. Keep it on:
+# logs are retained for 7 days and are the only record of an intermittent failure.
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
 [site]
 bucket = "./client/dist"
 
