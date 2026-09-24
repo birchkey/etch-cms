@@ -216,8 +216,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync form state when settings load
-  useEffect(() => {
+  // Sync form state when settings load (or change after a save). Done during render rather than
+  // in an effect so the fields never paint one frame of stale values after new settings arrive.
+  // The provider replaces the settings object on every apply(), so identity is the signal.
+  const [syncedSettings, setSyncedSettings] = useState(settings);
+  if (syncedSettings !== settings) {
+    setSyncedSettings(settings);
     setSiteName(settings.site_name);
     setLogoType(settings.logo_type);
     setLogoImageUrl(settings.logo_image_url);
@@ -226,7 +230,7 @@ export default function Settings() {
     setAccentColor(settings.accent_color);
     setHexInput(settings.accent_color);
     setUploadLimitMb(settings.upload_limit_mb);
-  }, [settings]);
+  }
 
   const handleSave = async () => {
     setSaving(true);

@@ -22,21 +22,40 @@ interface AssetPickerProps {
 
 export function AssetPicker({ open, onClose, onSelect, multiSelect, onSelectMultiple, contentTypeFilter }: AssetPickerProps) {
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [uploading, setUploading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
+  // Each open starts a new generation. Clearing the selection during render (rather than in the
+  // effect) means a reopened picker never paints the previous session's ticks, and comparing
+  // generations gives us `loading` without setting state from inside the effect.
+  const [openGeneration, setOpenGeneration] = useState(0);
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (open) {
       setSelectedIds(new Set());
-      setLoading(true);
-      assetsApi.list({ limit: 1000 })
-        .then(res => setAssets(res.data))
-        .catch(() => toast.error('Failed to load assets'))
-        .finally(() => setLoading(false));
+      setOpenGeneration(g => g + 1);
     }
-  }, [open]);
+  }
+  const [loadedGeneration, setLoadedGeneration] = useState(-1);
+  const loading = open && loadedGeneration !== openGeneration;
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    assetsApi.list({ limit: 1000 })
+      .then(res => {
+        if (!cancelled) setAssets(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error('Failed to load assets');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadedGeneration(openGeneration);
+      });
+    return () => { cancelled = true; };
+  }, [open, openGeneration]);
 
   const filtered = assets.filter(a =>
     a.original_name.toLowerCase().includes(search.toLowerCase()) &&

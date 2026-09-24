@@ -78,7 +78,6 @@ export default function EntryList() {
   const [meta, setMeta] = useState<PaginatedResponse<Entry>['meta'] | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -102,12 +101,16 @@ export default function EntryList() {
     }, { replace: true });
   };
 
-  useEffect(() => {
+  // Resetting during render rather than in an effect: an effect would paint one frame of the
+  // new collection with the previous one's page/search/selection before clearing them.
+  const [prevTypeId, setPrevTypeId] = useState(typeId);
+  if (prevTypeId !== typeId) {
+    setPrevTypeId(typeId);
     setPage(1);
     setSearch('');
     setDebouncedSearch('');
     setSelected(new Set());
-  }, [typeId]);
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -117,18 +120,28 @@ export default function EntryList() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  useEffect(() => {
+  // Selections are per-page, so drop them as the page changes rather than one render later.
+  const [prevPage, setPrevPage] = useState(page);
+  if (prevPage !== page) {
+    setPrevPage(page);
     setSelected(new Set());
-  }, [page]);
+  }
+
+  // See Assets.tsx: `loading` is derived from which request has settled, so the effect never
+  // sets state synchronously and a superseded response cannot overwrite a newer one.
+  const requestKey = `${typeId}|${page}|${statusFilter}|${sortBy}|${sortDir}|${debouncedSearch}|${refreshKey}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
     if (!typeId) return;
-    setLoading(true);
+    let cancelled = false;
     Promise.all([
       contentTypesApi.get(typeId),
       contentTypesApi.listEntries(typeId, { page, limit: PAGE_SIZE, status: statusFilter || undefined, sort_by: sortBy, sort_dir: sortDir, q: debouncedSearch || undefined }),
     ])
       .then(([ct, res]) => {
+        if (cancelled) return;
         // Singletons have no list view — send direct navigations to the global's editor
         if (ct.is_singleton) {
           navigate(`/globals/${typeId}`, { replace: true });
@@ -138,9 +151,14 @@ export default function EntryList() {
         setEntries(res.data);
         setMeta(res.meta);
       })
-      .catch(() => toast.error('Failed to load'))
-      .finally(() => setLoading(false));
-  }, [typeId, page, statusFilter, sortBy, sortDir, debouncedSearch, refreshKey, navigate]);
+      .catch(() => {
+        if (!cancelled) toast.error('Failed to load');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadedKey(requestKey);
+      });
+    return () => { cancelled = true; };
+  }, [typeId, page, statusFilter, sortBy, sortDir, debouncedSearch, refreshKey, navigate, requestKey]);
 
   const handleDuplicate = async (entry: Entry) => {
     try {

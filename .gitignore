@@ -4,8 +4,9 @@
 
 # Dependencies
 node_modules/
-package-lock.json
-client/package-lock.json
+# Lockfiles are committed on purpose: without them every clone re-resolves to whatever
+# is newest that day, which is how a wrangler peer-dependency bump broke `npm install`
+# for new users. Run `npm update` to move deliberately.
 
 # Build output
 client/dist/
