@@ -334,10 +334,12 @@ Copy the `database_id` from the D1 output and update the `database_id` field in 
 ### 4. Run database migrations
 
 ```bash
-wrangler d1 migrations apply your-d1-database-name --remote
+npm run db:migrate:remote
 ```
 
-> Always pass `--remote` when targeting your deployed D1 instance. Without it, Wrangler applies changes to a local SQLite file only.
+> The `db:*` scripts address the database through its `DB` **binding**, not its name, so they need no editing after you rename things in `wrangler.toml` — Wrangler resolves the binding to `database_id` itself.
+>
+> `npm run db:migrate` (no `:remote`) applies migrations to the local SQLite file used by `wrangler dev` instead. Always use `db:migrate:remote` for your deployed instance.
 
 ### 5. Configure secrets
 
@@ -417,19 +419,31 @@ Open `http://localhost:5173`.
 To develop against real content, you can export the production D1 database and import it into your local environment:
 
 ```bash
-# Export production DB to a local SQL file
-npx wrangler d1 export your-d1-database-name --remote --output=./prod-backup.sql
-
-# Wipe the local DB and replace it with the production export
-rm -rf .wrangler/state/v3/d1
-npx wrangler d1 execute your-d1-database-name --local --file=./prod-backup.sql
+npm run db:pull
 ```
 
-The export includes the full schema and data. You don't need to re-run migrations afterward.
+That exports production to `./prod-backup.sql`, wipes the local D1 state, and imports the
+export in its place. The export includes the full schema and data, so you don't need to
+re-run migrations afterward. Pass a different path with `npm run db:pull -- ./other.sql`.
 
 **Note:** Secrets (`ADMIN_PASSWORD_HASH`, `JWT_SECRET`, etc.) are stored as Wrangler secrets, not in the database, so the export contains no credentials. Your local login still uses the values in `.dev.vars`.
 
 `prod-backup.sql` is gitignored — don't commit it, especially if your content includes user-submitted data.
+
+### Database scripts
+
+Every script below targets the database through the `DB` binding in `wrangler.toml`, so none
+of them hardcode your database name or id — Wrangler looks those up itself.
+
+| Script | What it does |
+|--------|--------------|
+| `npm run db:migrate` | Apply pending migrations to the **local** dev database |
+| `npm run db:migrate:remote` | Apply pending migrations to **production** |
+| `npm run db:migrate:list` | List migrations not yet applied to production |
+| `npm run db:query -- "SELECT …"` | Run a one-off SQL statement locally |
+| `npm run db:query:remote -- "SELECT …"` | Run a one-off SQL statement against production |
+| `npm run db:export` | Dump production to `./prod-backup.sql` |
+| `npm run db:pull` | Dump production and replace the local database with it |
 
 ---
 
