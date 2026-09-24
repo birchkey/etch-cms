@@ -40,7 +40,10 @@ const REFRESH_TOKEN_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days (ms)
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
-async function isRateLimited(db: D1Database, ctx: ExecutionContext, ip: string, nowMs: number): Promise<boolean> {
+// Only waitUntil is needed here. Typing the parameter structurally keeps this compatible with
+// both Hono's ExecutionContext (what c.executionCtx returns) and the Workers runtime's, which
+// have drifted apart — workers-types v5 added `tracing`/`abort` that Hono's interface lacks.
+async function isRateLimited(db: D1Database, ctx: { waitUntil(promise: Promise<unknown>): void }, ip: string, nowMs: number): Promise<boolean> {
   const cutoff = nowMs - RATE_LIMIT_WINDOW_MS;
   ctx.waitUntil(db.prepare('DELETE FROM login_attempts WHERE attempted_at < ?').bind(cutoff).run());
   const row = await db.prepare(

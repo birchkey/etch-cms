@@ -20,6 +20,34 @@ interface EntryFormProps {
   singleton?: boolean;
 }
 
+// Pure field-level validation: depends only on its arguments, so it lives outside the
+// component rather than being rebuilt (and captured stale by callbacks) on every render.
+const validateField = (field: Field, value: unknown): string | null => {
+  if (value === null || value === undefined || value === '') return null;
+  if (field.type === 'text' || field.type === 'rich_text') {
+    const str = field.type === 'rich_text'
+      ? String(value).replace(/<[^>]+>/g, '')
+      : String(value);
+    if (field.min_length !== null && str.length < field.min_length)
+      return `Must be at least ${field.min_length} character${field.min_length !== 1 ? 's' : ''}`;
+    if (field.max_length !== null && str.length > field.max_length)
+      return `Must be ${field.max_length} character${field.max_length !== 1 ? 's' : ''} or fewer`;
+    if (field.pattern) {
+      try { if (!new RegExp(field.pattern).test(str)) return 'Does not match the required format'; }
+      catch { /* invalid regex */ }
+    }
+  }
+  if (field.type === 'number') {
+    const num = typeof value === 'number' ? value : Number(value);
+    if (!isNaN(num)) {
+      if (field.min_value !== null && num < field.min_value) return `Must be at least ${field.min_value}`;
+      if (field.max_value !== null && num > field.max_value) return `Must be ${field.max_value} or less`;
+    }
+  }
+  return null;
+};
+
+
 export default function EntryForm({ singleton = false }: EntryFormProps) {
   const { typeId, entryId } = useParams<{ typeId: string; entryId: string }>();
   const navigate = useNavigate();
@@ -42,6 +70,9 @@ export default function EntryForm({ singleton = false }: EntryFormProps) {
   const [copyingPreview, setCopyingPreview] = useState(false);
   const [showScheduler, setShowScheduler] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
+  // Earliest selectable slot, stamped when the picker opens. Reading the clock during render
+  // would make the rendered `min` depend on when React happened to re-render.
+  const [scheduleMin, setScheduleMin] = useState('');
   const [scheduling, setScheduling] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -163,32 +194,7 @@ export default function EntryForm({ singleton = false }: EntryFormProps) {
       }
       return next;
     });
-  }, [isNew, entry, slugManual, contentType, singleton]);
-
-  const validateField = (field: Field, value: unknown): string | null => {
-    if (value === null || value === undefined || value === '') return null;
-    if (field.type === 'text' || field.type === 'rich_text') {
-      const str = field.type === 'rich_text'
-        ? String(value).replace(/<[^>]+>/g, '')
-        : String(value);
-      if (field.min_length !== null && str.length < field.min_length)
-        return `Must be at least ${field.min_length} character${field.min_length !== 1 ? 's' : ''}`;
-      if (field.max_length !== null && str.length > field.max_length)
-        return `Must be ${field.max_length} character${field.max_length !== 1 ? 's' : ''} or fewer`;
-      if (field.pattern) {
-        try { if (!new RegExp(field.pattern).test(str)) return 'Does not match the required format'; }
-        catch { /* invalid regex */ }
-      }
-    }
-    if (field.type === 'number') {
-      const num = typeof value === 'number' ? value : Number(value);
-      if (!isNaN(num)) {
-        if (field.min_value !== null && num < field.min_value) return `Must be at least ${field.min_value}`;
-        if (field.max_value !== null && num > field.max_value) return `Must be ${field.max_value} or less`;
-      }
-    }
-    return null;
-  };
+  }, [isNew, entry, slugManual, contentType, singleton, typeId, entryId, scheduleAutoSave]);
 
   const validateAll = (values: Record<string, unknown>): Record<string, string> => {
     const errors: Record<string, string> = {};
@@ -316,6 +322,12 @@ export default function EntryForm({ singleton = false }: EntryFormProps) {
     }
   };
 
+  const openScheduler = () => {
+    // One minute out, so the floor is still in the future by the time the user confirms.
+    setScheduleMin(new Date(Date.now() + 60000).toISOString().slice(0, 16));
+    setShowScheduler(true);
+  };
+
   const handleSchedule = async () => {
     if (!entry || !scheduleDate) return;
     setScheduling(true);
@@ -369,8 +381,12 @@ export default function EntryForm({ singleton = false }: EntryFormProps) {
     }
   };
 
-  handleSaveRef.current = handleSave;
-  handlePublishRef.current = handlePublish;
+  // The keyboard shortcut below reads these on keypress, so they only need to be current by the
+  // time the browser can deliver an event — an effect after each render, never during one.
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+    handlePublishRef.current = handlePublish;
+  });
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -472,7 +488,7 @@ export default function EntryForm({ singleton = false }: EntryFormProps) {
                         value={scheduleDate}
                         onChange={e => setScheduleDate(e.target.value)}
                         className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
+                        min={scheduleMin}
                       />
                       <Button size="sm" onClick={handleSchedule} disabled={scheduling || !scheduleDate}>
                         {scheduling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Clock className="h-4 w-4 mr-2" />}
@@ -483,7 +499,7 @@ export default function EntryForm({ singleton = false }: EntryFormProps) {
                       </Button>
                     </div>
                   ) : (
-                    <Button variant="outline" size="sm" onClick={() => setShowScheduler(true)}>
+                    <Button variant="outline" size="sm" onClick={openScheduler}>
                       <Clock className="h-4 w-4 mr-2" />
                       Schedule
                     </Button>

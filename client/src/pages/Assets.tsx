@@ -35,7 +35,6 @@ export default function Assets() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [meta, setMeta] = useState<PaginatedResponse<Asset>['meta'] | null>(null);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -54,16 +53,30 @@ export default function Assets() {
     return () => clearTimeout(id);
   }, [search]);
 
+  // `loading` is derived rather than set inside the effect: setting it there would cascade an
+  // extra render, and would also leave a frame where the new page is requested but the old
+  // page's rows still render as settled. Comparing the settled key to the current one closes
+  // both gaps. The cancelled flag drops responses from superseded requests.
+  const requestKey = `${page}|${debouncedSearch}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
+
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     assetsApi.list({ page, limit: PAGE_SIZE, search: debouncedSearch || undefined })
       .then(res => {
+        if (cancelled) return;
         setAssets(res.data);
         setMeta(res.meta);
       })
-      .catch(() => toast.error('Failed to load assets'))
-      .finally(() => setLoading(false));
-  }, [page, debouncedSearch]);
+      .catch(() => {
+        if (!cancelled) toast.error('Failed to load assets');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadedKey(requestKey);
+      });
+    return () => { cancelled = true; };
+  }, [page, debouncedSearch, requestKey]);
 
   const handleUpload = async (files: FileList | null) => {
     if (!files?.length) return;

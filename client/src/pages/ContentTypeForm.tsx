@@ -103,7 +103,7 @@ export default function ContentTypeForm() {
 
   const [name, setName] = useState('');
   usePageTitle(isNew ? 'New Collection' : name);
-  const [slug, setSlug] = useState('');
+  const [slugEdited, setSlugEdited] = useState('');
   const [description, setDescription] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const [isSingleton, setIsSingleton] = useState(false);
@@ -112,11 +112,10 @@ export default function ContentTypeForm() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!isNew);
 
-  // Auto-slug from name if slug hasn't been manually edited
+  // Auto-slug from name if slug hasn't been manually edited. Derived rather than mirrored into
+  // state by an effect, so the field can never render a slug that lags a keystroke behind name.
   const [slugManual, setSlugManual] = useState(false);
-  useEffect(() => {
-    if (!slugManual) setSlug(slugify(name));
-  }, [name, slugManual]);
+  const slug = slugManual ? slugEdited : slugify(name);
 
   useEffect(() => {
     contentTypesApi.list().then(setAllContentTypes).catch(() => {});
@@ -124,7 +123,7 @@ export default function ContentTypeForm() {
       contentTypesApi.get(id)
         .then(ct => {
           setName(ct.name);
-          setSlug(ct.slug);
+          setSlugEdited(ct.slug);
           setDescription(ct.description ?? '');
           setPreviewUrl(ct.preview_url ?? '');
           setIsSingleton(ct.is_singleton === 1);
@@ -305,7 +304,7 @@ export default function ContentTypeForm() {
             <Label>Slug</Label>
             <Input
               value={slug}
-              onChange={e => { setSlug(e.target.value); setSlugManual(true); }}
+              onChange={e => { setSlugEdited(e.target.value); setSlugManual(true); }}
               placeholder="blog-post"
               className="font-mono text-sm"
             />

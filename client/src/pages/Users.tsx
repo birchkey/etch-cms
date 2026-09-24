@@ -280,9 +280,13 @@ function EditNameDialog({
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  // Seed the field when a different user is opened. Done during render so the input never
+  // shows the previously-edited user's name for a frame.
+  const [seededUser, setSeededUser] = useState(user);
+  if (seededUser !== user) {
+    setSeededUser(user);
     if (user) setName(user.name ?? '');
-  }, [user]);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -332,14 +336,19 @@ function PermissionsDialog({ user, onClose }: { user: CmsUser | null; onClose: (
   const [contentTypes, setContentTypes] = useState<ContentType[]>([]);
   const [restricted, setRestricted] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Derived rather than set in the effect, so reopening on a different user shows a spinner
+  // immediately instead of that user's row briefly rendering the previous user's permissions.
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
+  const loading = user !== null && loadedUserId !== user.id;
 
   useEffect(() => {
     if (!user) return;
-    setLoading(true);
+    let cancelled = false;
     Promise.all([contentTypesApi.list(), usersApi.getPermissions(user.id)])
       .then(([types, perms]) => {
+        if (cancelled) return;
         setContentTypes(types);
         if (perms.contentTypeIds.length > 0) {
           setRestricted(true);
@@ -349,8 +358,13 @@ function PermissionsDialog({ user, onClose }: { user: CmsUser | null; onClose: (
           setSelectedIds(new Set());
         }
       })
-      .catch(() => toast.error('Failed to load permissions'))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) toast.error('Failed to load permissions');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadedUserId(user.id);
+      });
+    return () => { cancelled = true; };
   }, [user]);
 
   const handleSave = async () => {
