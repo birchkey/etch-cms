@@ -139,7 +139,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 // A session JWT proves who signed in, but not what they may do now: the user is re-read on
 // every request, so deleting a user or changing their role takes effect immediately rather
 // than when their access token expires.
-async function verifySession(env: Env, token: string): Promise<JWTPayload | null> {
+export async function verifySession(env: Env, token: string): Promise<JWTPayload | null> {
   const payload = await verifyJWT(token, env.JWT_SECRET);
   if (!payload) return null;
   const user = await resolveUser(env, payload.sub);

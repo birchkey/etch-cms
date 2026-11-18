@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { getCookie } from 'hono/cookie';
 import { Env, EntryRow } from './types';
-import { verifyJWT } from './middleware/auth';
+import { verifySession } from './middleware/auth';
 import { verifyAssetSignature } from './lib/utils';
 import { deliverWebhooks } from './lib/deliver';
 import authRoutes from './routes/auth';
@@ -85,6 +85,10 @@ app.get('/r2/:key{.+}', async (c) => {
     'SELECT id FROM assets WHERE r2_key = ? AND is_public = 1'
   ).bind(`assets/${key}`).first<{ id: string }>());
 
+  // Set when the request was authorised by a session cookie rather than a link anyone holding
+  // it can use, so the response must not be stored by shared caches.
+  let viaSession = false;
+
   if (expires && sig) {
     // External access via signed URL. A stale signature on a public asset is not a
     // failure — the asset needs no signature at all — so fall back to the public check
@@ -92,9 +96,11 @@ app.get('/r2/:key{.+}', async (c) => {
     const valid = await verifyAssetSignature(`/r2/${key}`, expires, sig, c.env.JWT_SECRET);
     if (!valid && !(await isPublicAsset())) return c.json({ error: 'Forbidden' }, 403);
   } else {
-    // Admin UI access via session cookie
+    // Admin UI access via session cookie. Checked against the user as they are now, so a
+    // deleted user can't keep loading private files until their access token expires.
     const token = getCookie(c, 'etch_access');
-    const payload = token ? await verifyJWT(token, c.env.JWT_SECRET) : null;
+    const payload = token ? await verifySession(c.env, token) : null;
+    viaSession = !!payload;
     if (!payload && !(await isPublicAsset())) {
       // Allow unauthenticated access to assets used as branding — the login page
       // needs to load the logo and favicon before the user has authenticated.
@@ -112,7 +118,9 @@ app.get('/r2/:key{.+}', async (c) => {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set('etag', object.httpEtag);
-  headers.set('cache-control', 'public, max-age=31536000');
+  // A file served because of who is signed in is private to them: only their browser may keep
+  // it, never a shared cache.
+  headers.set('cache-control', `${viaSession ? 'private' : 'public'}, max-age=31536000`);
   // Prevent scripts in SVGs from executing when opened directly in a browser tab
   headers.set('content-security-policy', "default-src 'none'");
 
