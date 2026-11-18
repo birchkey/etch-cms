@@ -3,13 +3,16 @@
 // Uses identical parameters to hashPassword() in src/middleware/auth.ts.
 //
 // Usage:  node scripts/hash-password.mjs <password>
+//         node scripts/hash-password.mjs --print <password>   (print only; .dev.vars untouched)
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const password = process.argv[2];
+const args = process.argv.slice(2);
+const printOnly = args.includes('--print');
+const password = args.find(a => a !== '--print');
 if (!password) {
-  console.error('Usage: node scripts/hash-password.mjs <password>');
+  console.error('Usage: node scripts/hash-password.mjs [--print] <password>');
   process.exit(1);
 }
 
@@ -26,6 +29,12 @@ const bits = await crypto.subtle.deriveBits(
 const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
 const hashHex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
 const newHash = `pbkdf2:${saltHex}:${hashHex}`;
+
+// For production secrets (or any hash you just need to copy), don't overwrite the local admin password.
+if (printOnly) {
+  console.log(newHash);
+  process.exit(0);
+}
 
 const devVarsPath = resolve(process.cwd(), '.dev.vars');
 if (!existsSync(devVarsPath)) {

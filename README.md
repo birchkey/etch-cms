@@ -352,7 +352,7 @@ cp .dev.vars.example .dev.vars
 node scripts/hash-password.mjs yourpassword
 ```
 
-The script writes `ADMIN_PASSWORD_HASH` to `.dev.vars` automatically and prints the value. Wrangler loads `.dev.vars` during `wrangler dev` — add it to `.gitignore`.
+The script writes `ADMIN_PASSWORD_HASH` to `.dev.vars` automatically and prints the value. Wrangler loads `.dev.vars` during `wrangler dev`; it's already in `.gitignore`, so it won't be committed.
 
 **For production**, set secrets via Wrangler:
 
@@ -360,13 +360,16 @@ The script writes `ADMIN_PASSWORD_HASH` to `.dev.vars` automatically and prints 
 # Admin username
 wrangler secret put ADMIN_USERNAME
 
-# Admin password hash — generate with the included script, then copy the printed hash value:
-node scripts/hash-password.mjs yourpassword
+# Admin password hash — --print outputs the hash without touching .dev.vars; paste it at the prompt:
+node scripts/hash-password.mjs --print yourpassword
 wrangler secret put ADMIN_PASSWORD_HASH
 
 # JWT signing secret
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 wrangler secret put JWT_SECRET
+
+# Optional: require a key for the public API (sent as Authorization: Bearer <key>)
+wrangler secret put PUBLIC_API_KEY
 ```
 
 ### 6. Build the client and deploy
@@ -451,7 +454,7 @@ of them hardcode your database name or id — Wrangler looks those up itself.
 
 ## Public API Reference
 
-All `/api/public/` endpoints are unauthenticated and CORS-enabled for cross-origin use.
+All `/api/public/` endpoints are CORS-enabled for cross-origin use. They are unauthenticated by default. If the optional `PUBLIC_API_KEY` secret is set, every request must send it as `Authorization: Bearer <key>` (see [Configure secrets](#5-configure-secrets)).
 
 | Method | Path | Description |
 |--------|------|-------------|
