@@ -219,7 +219,7 @@ Toggle **Public link** on the asset (in the entry editor beside the file, or in 
 
 Turning the toggle on reveals the permanent URL right below it, with buttons to copy it or open it in a new tab — that's the link to paste into a Webstudio button, an email, or a nav item. If you've configured a [files subdomain](#7-optional-a-files-subdomain-for-public-assets), the link is built on that hostname.
 
-> **Copying a private asset's URL.** The Assets library's copy button works on private assets too, but the URL it gives you only resolves for a signed-in admin — it will load in your browser and 401 for your visitors. Etch warns you when you copy one. Turn on public access before using a link anywhere public.
+> **Copying a private asset's URL.** The Assets library's copy button works on private assets too, but the URL it gives you only resolves for a signed-in user — it will load in your browser and 401 for your visitors. Etch warns you when you copy one. Turn on public access before using a link anywhere public.
 
 ### Alt text
 
@@ -341,7 +341,11 @@ This builds the admin UI, applies any pending migrations to production, and depl
 
 Users are **admins** or **editors**, and you manage both under **Users** in the sidebar. Editors create and edit entries and assets, and can be limited to specific content types. Admins can also manage users, content types, settings, webhooks and the audit log. There is always at least one admin: Etch refuses to demote or delete the last one.
 
-Role changes and deletions take effect on the user's next request, including requests made with their API tokens.
+Role changes and deletions take effect on the user's next request, including requests made with their API tokens and loading private assets.
+
+Granting admin access asks for your own password: creating an admin, making someone an admin, or resetting another admin's password. That way a stolen session or a leaked API token can't create a lasting admin, and wrong guesses count toward the sign-in rate limit. Everyone, admins included, can change their own password from the sidebar.
+
+The audit log records which account made each change. If that account is later deleted, its entries are marked **deleted account**, so they can't be confused with a new user who reuses the username. Older entries, recorded before this was added, only have the username.
 
 **Locked out?** If no one can sign in as an admin, reset one from a terminal signed in to your Cloudflare account:
 
@@ -483,9 +487,11 @@ curl https://your-worker.workers.dev/api/content-types \
   -H "Authorization: Bearer etch_…"
 ```
 
-A token acts as the user who created it, with the same role and content-type permissions, checked on every request. Deleting the user or changing their role or permissions takes effect immediately. Tokens are shown once at creation, stored only as a hash, can be set to expire, and can be revoked by their owner or any admin. Changes made with a token are recorded in the activity log with the token's ID. A token can't create other tokens or change a password; those require signing in.
+A token acts as the user who created it, with the same role and content-type permissions, checked on every request. Deleting the user or changing their role or permissions takes effect immediately. Tokens are shown once at creation, stored only as a hash, can be set to expire, and can be revoked by their owner or any admin. Changes made with a token are recorded in the activity log with the token's ID. A token can't create other tokens, change a password, or grant admin access; those require signing in.
 
 Editors can create and edit entries. Admins can additionally manage content types, users, webhooks, and settings.
+
+Users have a `role` of `admin` or `editor` (`POST /api/users` defaults to `editor`). Requests that grant admin access must include the signed-in admin's own password as `currentPassword` and can't be made with an API token. That covers `POST /api/users` with `role: "admin"`, `PATCH /api/users/:id` changing `role` to `admin`, and `PATCH /api/users/:id/password` on an admin. Without the password they return `403` with `code: "password_required"`, or `"password_incorrect"` if it's wrong. Demoting or deleting the last admin returns `409`.
 
 ```
 POST   /api/auth/login
@@ -530,6 +536,8 @@ POST   /api/users                                  (admin)
 PATCH  /api/users/:id                              (admin)
 PATCH  /api/users/:id/password                     (admin)
 DELETE /api/users/:id                              (admin)
+GET    /api/users/:id/permissions                  (admin)
+PUT    /api/users/:id/permissions                  (admin)
 
 GET    /api/settings
 PUT    /api/settings                               (admin)
