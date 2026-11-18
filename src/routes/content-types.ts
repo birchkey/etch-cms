@@ -599,6 +599,13 @@ contentTypes.get('/:typeId/entries', async (c) => {
     whereClause += ' AND e.status = ?';
     bindings.push(status);
   }
+  // Exact slug match, normalised like slugs are on save. Used to find an existing entry by
+  // its natural key before creating it, so imports can be re-run without duplicates.
+  const slugParam = c.req.query('slug')?.trim();
+  if (slugParam) {
+    whereClause += ' AND e.slug = ?';
+    bindings.push(slugify(slugParam));
+  }
   if (q) {
     const like = `%${q}%`;
     whereClause += ` AND (e.slug LIKE ? OR e.id IN (

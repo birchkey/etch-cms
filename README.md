@@ -528,6 +528,7 @@ DELETE /api/entries/:id
 GET    /api/assets
 POST   /api/assets
 POST   /api/assets/register
+POST   /api/assets/import
 PATCH  /api/assets/:id
 DELETE /api/assets/:id
 
@@ -618,7 +619,7 @@ The response is the created entry; use its `id` to publish:
 PATCH /api/entries/:id/publish
 ```
 
-- `slug` is optional and is normalised to lowercase-with-hyphens. A slug already used in that content type returns **409**, which makes it a natural key for re-runnable imports: look an entry up first with `GET /api/content-types/:typeId/entries?q=<slug>` (a substring search over slugs and field values, so compare `slug` exactly; paginated with `page` and `limit`, up to 1000 per page) and update it with `PUT /api/entries/:id` (same body, without `content_type_id`) instead of creating a duplicate.
+- `slug` is optional and is normalised to lowercase-with-hyphens. A slug already used in that content type returns **409**, which makes it a natural key for re-runnable imports: look an entry up first with `GET /api/content-types/:typeId/entries?slug=<slug>` (an exact match, normalised the same way) and update it with `PUT /api/entries/:id` (same body, without `content_type_id`) instead of creating a duplicate.
 - **Field values aren't validated when an entry is created or updated.** Unknown field slugs are silently dropped, and required fields, lengths, ranges and patterns are only checked when publishing. A publish that fails returns **400** with a `fieldErrors` object keyed by field slug. Publishing an entry that links to unpublished entries succeeds but returns a `warnings` array, and those links are left out of the public API until the related entries are published.
 - **Globals** can't be created with `POST /api/entries` (it returns 409). `GET /api/content-types/:typeId/singleton` returns the global's one entry; fill it with `PUT /api/entries/:id`, then publish.
 - To keep an entry unpublished until a date, use `PATCH /api/entries/:id/schedule` with `{ "scheduled_at": <Unix ms> }` instead of publishing.
@@ -656,7 +657,38 @@ curl https://your-worker.workers.dev/api/assets \
 
 Accepted types are JPEG, PNG, GIF, WebP, AVIF, SVG, ICO, PDF, MP4 and WebM. The response includes the asset's `filename`; the value to put in an `image` field or a rich-text `src` is `/r2/<filename>`.
 
+To bring in a file that's already online, send its URL instead and the Worker downloads it:
+
+```http
+POST /api/assets/import
+{ "url": "https://cdn.example.com/products/lamp.jpg", "alt_text": "Brass desk lamp" }
+```
+
+Only public `https` URLs are accepted (no IP addresses or `localhost`), up to 3 redirects are followed, and the download times out after 20 seconds. The same type and size rules apply as for uploads; the type is taken from the file's content when the server sends a generic one like `application/octet-stream`. A URL that was imported before returns the existing asset with **200** instead of storing a copy (a new import returns **201**), so imports can be re-run safely. The asset's `source_url` records where it came from.
+
 For a large library, copy the files into the R2 bucket under `assets/` first (with `wrangler r2 object put` or rclone), then add each one to the asset library with `POST /api/assets/register` and `{ "r2_key": "assets/<filename>", "alt_text": "…" }`. That avoids sending every file through the Worker.
+
+## MCP Server
+
+Etch includes an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so AI agents such as Claude can read your content model, import images and create and publish entries. Connect with an [API token](#admin-api-reference). The agent acts as the token's owner, with the same role, content-type permissions and activity-log attribution as any other API client.
+
+```bash
+claude mcp add --transport http etch https://your-worker.workers.dev/mcp \
+  --header "Authorization: Bearer etch_…"
+```
+
+| Tool | What it does |
+|------|--------------|
+| `list_content_types`, `get_content_type` | Read the schema: each field's slug, type, whether it's required, and its options |
+| `list_entries`, `get_entry` | Find entries by status, exact slug or search text; read one with its latest draft values |
+| `create_entries` | Create up to 50 drafts of one content type. With `if_exists: "update"`, an entry whose slug already exists is updated instead, so imports can be re-run |
+| `update_entry` | Change an entry's fields or slug |
+| `publish_entries`, `unpublish_entries` | Publish or unpublish up to 100 entries; validation failures come back per entry |
+| `list_assets`, `import_assets_from_urls` | Browse the asset library; import up to 10 files from public URLs (see [Assets](#assets)) |
+
+Every tool goes through the admin API, so the rules above apply unchanged. Admin-only actions (content types, users, settings, webhooks) and deleting things aren't available through MCP. Publishing fires webhooks as usual, so for a large import have the agent create everything as drafts and publish at the end.
+
+The endpoint accepts API tokens only, not session cookies. Clients that sign in with OAuth, such as custom connectors on claude.ai, aren't supported yet.
 
 ---
 

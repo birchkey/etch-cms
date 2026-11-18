@@ -7,6 +7,8 @@ import assetRoutes from '../../routes/assets';
 import apiTokenRoutes from '../../routes/api-tokens';
 import contentTypeRoutes from '../../routes/content-types';
 import auditLogRoutes from '../../routes/audit-log';
+import entryRoutes from '../../routes/entries';
+import { createMcpRoutes } from '../../routes/mcp';
 import { hashPassword } from '../../middleware/auth';
 import { createTestD1 } from './d1';
 import type { Env } from '../../types';
@@ -17,6 +19,7 @@ export async function createTestApp() {
   const { d1, raw } = createTestD1();
   const env = {
     DB: d1,
+    ASSETS_BUCKET: createFakeR2(),
     JWT_SECRET: 'test-jwt-secret',
     ADMIN_USERNAME: ENV_ADMIN.username,
     ADMIN_PASSWORD_HASH: await hashPassword(ENV_ADMIN.password),
@@ -30,6 +33,8 @@ export async function createTestApp() {
   app.route('/api/tokens', apiTokenRoutes);
   app.route('/api/content-types', contentTypeRoutes);
   app.route('/api/audit-logs', auditLogRoutes);
+  app.route('/api/entries', entryRoutes);
+  app.route('/mcp', createMcpRoutes(app));
 
   const pending: Promise<unknown>[] = [];
   const ctx = {
@@ -58,7 +63,23 @@ export async function createTestApp() {
     return { res, session };
   }
 
-  return { app, env, db: raw, request, login };
+  return { app, env, ctx, pending, db: raw, request, login };
+}
+
+// The slice of R2 the asset routes use, kept in memory.
+export function createFakeR2() {
+  const objects = new Map<string, { body: Uint8Array; contentType?: string }>();
+  return {
+    objects,
+    async put(key: string, value: ArrayBuffer, opts?: { httpMetadata?: { contentType?: string } }) {
+      objects.set(key, { body: new Uint8Array(value), contentType: opts?.httpMetadata?.contentType });
+    },
+    async head(key: string) {
+      const o = objects.get(key);
+      return o ? { size: o.body.byteLength, httpMetadata: { contentType: o.contentType } } : null;
+    },
+    async delete(key: string) { objects.delete(key); },
+  };
 }
 
 // A cookie jar for one browser session.

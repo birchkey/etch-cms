@@ -16,6 +16,7 @@ import webhookRoutes from './routes/webhooks';
 import previewRoutes from './routes/preview';
 import auditLogRoutes from './routes/audit-log';
 import apiTokenRoutes from './routes/api-tokens';
+import { createMcpRoutes } from './routes/mcp';
 
 import { getAssetFromKV } from '@cloudflare/kv-asset-handler';
 // @ts-expect-error -- __STATIC_CONTENT_MANIFEST is a virtual module injected by wrangler at build time
@@ -70,6 +71,9 @@ app.route('/api/webhooks', webhookRoutes);
 app.route('/api/preview', previewRoutes);
 app.route('/api/audit-logs', auditLogRoutes);
 app.route('/api/tokens', apiTokenRoutes);
+
+// MCP server for AI agents; its tools call the API routes above through this app.
+app.route('/mcp', createMcpRoutes(app));
 
 // Serve R2 objects
 // Note: responses are cached by browsers for 1 year via cache-control, but Cloudflare's edge

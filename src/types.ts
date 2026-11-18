@@ -101,6 +101,7 @@ export interface AssetRow {
   r2_key: string;
   alt_text: string | null;
   is_public: number; // 0 or 1
+  source_url: string | null; // set when imported from a URL
   created_at: number;
 }
 
