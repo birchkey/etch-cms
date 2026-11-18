@@ -15,15 +15,16 @@ head_sampling_rate = 1.0
 [site]
 bucket = "./client/dist"
 
+# `npm run setup` fills in these names and creates the database and bucket. No database_id is
+# needed: Wrangler looks the database up by name (and creates it on deploy if it's missing).
 [[d1_databases]]
 binding = "DB"
 database_name = "your-d1-database-name"
-database_id = "your-d1-database-id" # wrangler d1 create your-d1-database-name
 migrations_dir = "migrations"
 
 [[r2_buckets]]
 binding = "ASSETS_BUCKET"
-bucket_name = "your-r2-bucket-name" # wrangler r2 bucket create your-r2-bucket-name
+bucket_name = "your-r2-bucket-name"
 
 [vars]
 ENVIRONMENT = "production"

@@ -301,87 +301,80 @@ The token is valid for 7 days and bypasses the published-only filter, letting yo
 
 ### Prerequisites
 
-- A [Cloudflare account](https://cloudflare.com) (free tier works)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed and authenticated (`wrangler login`)
+- A [Cloudflare account](https://cloudflare.com) (free tier works) with **R2 enabled**. R2 has a free tier, but Cloudflare asks you to turn it on once in the dashboard (R2 Object Storage) before buckets can be created.
+- Node.js 22 or newer. Wrangler is installed with the project, so you don't need it globally.
 
-### 1. Clone and install
+### Setup
 
 ```bash
 git clone https://github.com/birchkey/etch-cms
 cd etch-cms
 npm install
-cd client && npm install && cd ..
+npm run setup
 ```
 
-### 2. Configure Wrangler
+`npm run setup` asks for a name and an admin username and password, then:
+
+1. Logs you in to Cloudflare if needed (and asks which account to use if you have several).
+2. Writes `wrangler.toml` from `wrangler.example.toml`.
+3. Creates the D1 database and R2 bucket.
+4. Hashes your password, generates a JWT signing secret, and saves both to `.dev.vars` for local development and to your Worker's secrets for production.
+5. Runs database migrations locally and in production.
+6. Builds the admin UI and deploys.
+
+Your CMS will be live at `https://<name>.<your-subdomain>.workers.dev`. Sign in with the admin login you chose.
+
+Setup is safe to re-run. It reuses anything that already exists, offers to change the admin login, and never replaces production's `JWT_SECRET` (that would sign everyone out and break preview links and signed asset URLs).
+
+To set up **local development only**, with no Cloudflare account, run `npm run setup -- --local`.
+
+### Deploying changes
 
 ```bash
-cp wrangler.example.toml wrangler.toml
+npm run deploy
 ```
 
-Open `wrangler.toml` and replace the placeholder values — `your-worker-name`, `your-d1-database-name`, `your-r2-bucket-name`, and `your-d1-database-id` — with your own names. Choose your database and bucket names now (you'll create the actual resources in the next step), then come back to fill in the `database_id` once Cloudflare generates it.
+This builds the admin UI, applies any pending migrations to production, and deploys the Worker.
 
-### 3. Create Cloudflare resources
+### Secrets
 
-```bash
-# Create the D1 database
-wrangler d1 create your-d1-database-name
+Setup sets the required secrets for you. To change them later:
 
-# Create the R2 bucket
-wrangler r2 bucket create your-r2-bucket-name
-```
+| Secret | Purpose |
+|--------|---------|
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` | Admin login. Re-run `npm run setup` to change them, or set the hash yourself with `node scripts/hash-password.mjs --print <password>` and `npx wrangler secret put ADMIN_PASSWORD_HASH`. |
+| `JWT_SECRET` | Signs sessions, preview links and signed asset URLs. Changing it signs everyone out and invalidates links already issued. |
+| `PUBLIC_API_KEY` | Optional. When set, every public API request must send it as `Authorization: Bearer <key>`. Set it with `npx wrangler secret put PUBLIC_API_KEY`. |
 
-Copy the `database_id` from the D1 output and update the `database_id` field in `wrangler.toml`. Set `database_name` and `bucket_name` to match the names you chose above.
-
-### 4. Run database migrations
-
-```bash
-npm run db:migrate:remote
-```
-
-> The `db:*` scripts address the database through its `DB` **binding**, not its name, so they need no editing after you rename things in `wrangler.toml` — Wrangler resolves the binding to `database_id` itself.
->
-> `npm run db:migrate` (no `:remote`) applies migrations to the local SQLite file used by `wrangler dev` instead. Always use `db:migrate:remote` for your deployed instance.
-
-### 5. Configure secrets
-
-**For local development**, copy the example env file, then use the included script to generate and write the password hash directly to `.dev.vars`:
+<details>
+<summary>Manual setup (without the setup script)</summary>
 
 ```bash
+npm install
+cp wrangler.example.toml wrangler.toml   # replace the your-* placeholders with your own names
+npx wrangler d1 create <database-name>
+npx wrangler r2 bucket create <bucket-name>
+
+# Local development
 cp .dev.vars.example .dev.vars
-node scripts/hash-password.mjs yourpassword
-```
-
-The script writes `ADMIN_PASSWORD_HASH` to `.dev.vars` automatically and prints the value. Wrangler loads `.dev.vars` during `wrangler dev`; it's already in `.gitignore`, so it won't be committed.
-
-**For production**, set secrets via Wrangler:
-
-```bash
-# Admin username
-wrangler secret put ADMIN_USERNAME
-
-# Admin password hash — --print outputs the hash without touching .dev.vars; paste it at the prompt:
-node scripts/hash-password.mjs --print yourpassword
-wrangler secret put ADMIN_PASSWORD_HASH
-
-# JWT signing secret
+node scripts/hash-password.mjs <password>   # writes ADMIN_PASSWORD_HASH to .dev.vars
+# also set JWT_SECRET in .dev.vars:
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-wrangler secret put JWT_SECRET
+npm run db:migrate
 
-# Optional: require a key for the public API (sent as Authorization: Bearer <key>)
-wrangler secret put PUBLIC_API_KEY
+# Production
+npx wrangler secret put ADMIN_USERNAME
+node scripts/hash-password.mjs --print <password>   # paste the output at the next prompt
+npx wrangler secret put ADMIN_PASSWORD_HASH
+npx wrangler secret put JWT_SECRET                  # a new random value, not the local one
+npm run deploy
 ```
 
-### 6. Build the client and deploy
+`wrangler.toml` needs no `database_id`: Wrangler finds the database by name.
 
-```bash
-cd client && npm run build && cd ..
-wrangler deploy
-```
+</details>
 
-Your CMS will be live at `https://etch-cms.YOUR_SUBDOMAIN.workers.dev`.
-
-### 7. Optional: a files subdomain for public assets
+### Optional: a files subdomain for public assets
 
 Public assets are served from whatever hostname runs the Worker, which means a PDF link on a client's site reads `https://your-cms-host/r2/abc.pdf`. You can serve them from a branded hostname instead — `files.example.org` — so the links you hand out are stable and on-brand, and so you could move to different storage later without breaking URLs already in the wild.
 
@@ -414,7 +407,7 @@ Signed URLs are signed over the path only, not the host, so they validate on eit
 npm run dev
 
 # Terminal 2 — Vite dev server (port 5173, proxies /api to 8787)
-cd client && npm run dev
+npm --prefix client run dev
 ```
 
 Open `http://localhost:5173`.
@@ -454,7 +447,7 @@ of them hardcode your database name or id — Wrangler looks those up itself.
 
 ## Public API Reference
 
-All `/api/public/` endpoints are CORS-enabled for cross-origin use. They are unauthenticated by default. If the optional `PUBLIC_API_KEY` secret is set, every request must send it as `Authorization: Bearer <key>` (see [Configure secrets](#5-configure-secrets)).
+All `/api/public/` endpoints are CORS-enabled for cross-origin use. They are unauthenticated by default. If the optional `PUBLIC_API_KEY` secret is set, every request must send it as `Authorization: Bearer <key>` (see [Secrets](#secrets)).
 
 | Method | Path | Description |
 |--------|------|-------------|

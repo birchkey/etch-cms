@@ -3,8 +3,12 @@
   "version": "0.1.1",
   "private": true,
   "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "postinstall": "npm --prefix client install --no-audit --no-fund",
+    "predev": "node -e \"require('node:fs').mkdirSync('client/dist',{recursive:true})\"",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "build": "npm --prefix client run build",
+    "deploy": "npm run build && wrangler d1 migrations apply DB --remote && wrangler deploy",
     "cf-typegen": "wrangler types",
     "test": "vitest run",
     "test:watch": "vitest",

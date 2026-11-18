@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Generates a password hash and writes it directly to .dev.vars.
-// Uses identical parameters to hashPassword() in src/middleware/auth.ts.
+// For first-time setup, use `npm run setup` instead; it does this for you.
 //
 // Usage:  node scripts/hash-password.mjs <password>
 //         node scripts/hash-password.mjs --print <password>   (print only; .dev.vars untouched)
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { hashPassword } from './lib/password.mjs';
 
 const args = process.argv.slice(2);
 const printOnly = args.includes('--print');
@@ -16,19 +17,7 @@ if (!password) {
   process.exit(1);
 }
 
-const encoder = new TextEncoder();
-const salt = crypto.getRandomValues(new Uint8Array(16));
-const keyMaterial = await crypto.subtle.importKey(
-  'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']
-);
-const bits = await crypto.subtle.deriveBits(
-  { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100000 },
-  keyMaterial,
-  256
-);
-const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
-const hashHex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
-const newHash = `pbkdf2:${saltHex}:${hashHex}`;
+const newHash = await hashPassword(password);
 
 // For production secrets (or any hash you just need to copy), don't overwrite the local admin password.
 if (printOnly) {
