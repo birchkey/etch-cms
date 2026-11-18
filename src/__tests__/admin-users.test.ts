@@ -14,8 +14,8 @@ async function adminSession(t: TestApp) {
   return session;
 }
 
-async function createUser(t: TestApp, admin: Session, username: string, role: 'admin' | 'editor' = 'editor') {
-  const res = await t.request('/api/users', { method: 'POST', cookies: admin, body: { username, password: `${username}-password`, role } });
+async function createUser(t: TestApp, admin: Session, username: string, role: 'admin' | 'editor' = 'editor', currentPassword = ENV_ADMIN.password) {
+  const res = await t.request('/api/users', { method: 'POST', cookies: admin, body: { username, password: `${username}-password`, role, currentPassword } });
   expect(res.status).toBe(201);
   return json<{ id: string; role: string }>(res);
 }
@@ -79,11 +79,11 @@ describe('retiring the environment admin', () => {
     expect((await t.request('/api/users', { bearer: 'etch_legacy-token' })).status).toBe(200);
   });
 
-  it('moves the environment admin first if it promotes someone before signing in', async () => {
+  it('the environment admin\'s API tokens cannot create an admin (which would lock it out)', async () => {
     t.db.prepare("INSERT INTO api_tokens (id, name, token_hash, token_hint, owner_sub, created_at) VALUES ('tok', 'ci', ?, 'etch_abcd', ?, ?)")
       .run(await (await import('../lib/api-tokens')).hashApiToken('etch_legacy-token'), ENV_ADMIN.username, Date.now() - 1000);
-    const res = await t.request('/api/users', { method: 'POST', bearer: 'etch_legacy-token', body: { username: 'second', password: 'second-password', role: 'admin' } });
-    expect(res.status).toBe(201);
+    const res = await t.request('/api/users', { method: 'POST', bearer: 'etch_legacy-token', body: { username: 'second', password: 'second-password', role: 'admin', currentPassword: ENV_ADMIN.password } });
+    expect(res.status).toBe(403);
     expect((await t.login(ENV_ADMIN.username, ENV_ADMIN.password)).res.status).toBe(200);
   });
 
@@ -185,5 +185,88 @@ describe('admin roles', () => {
     const { res, session } = await t.login('odd', 'odd-password');
     expect((await json(res)).role).toBe('editor');
     expect((await t.request('/api/users', { cookies: session })).status).toBe(403);
+  });
+});
+
+describe('confirming your password to grant admin access', () => {
+  let t: TestApp;
+  let admin: Session;
+  beforeEach(async () => { t = await createTestApp(); admin = await adminSession(t); });
+
+  const create = (body: Record<string, unknown>, opts: { cookies?: Session; bearer?: string } = { cookies: admin }) =>
+    t.request('/api/users', { method: 'POST', ...opts, body: { username: 'new', password: 'new-password', ...body } });
+
+  it('is required to create an admin', async () => {
+    const res = await create({ role: 'admin' });
+    expect(res.status).toBe(403);
+    expect((await json(res)).code).toBe('password_required');
+    expect(t.db.prepare("SELECT COUNT(*) AS n FROM users WHERE username = 'new'").get()).toEqual({ n: 0 });
+  });
+
+  it('rejects a wrong password', async () => {
+    const res = await create({ role: 'admin', currentPassword: 'wrong' });
+    expect(res.status).toBe(403);
+    expect((await json(res)).code).toBe('password_incorrect');
+  });
+
+  it('is not required to create an editor', async () => {
+    expect((await create({ role: 'editor' })).status).toBe(201);
+  });
+
+  it('is required to promote an editor', async () => {
+    const ed = await createUser(t, admin, 'ed');
+    const path = `/api/users/${ed.id}`;
+    expect((await t.request(path, { method: 'PATCH', cookies: admin, body: { role: 'admin' } })).status).toBe(403);
+    expect((await t.request(path, { method: 'PATCH', cookies: admin, body: { role: 'admin', currentPassword: ENV_ADMIN.password } })).status).toBe(200);
+  });
+
+  it('is not required to demote an admin', async () => {
+    const second = await createUser(t, admin, 'second', 'admin');
+    expect((await t.request(`/api/users/${second.id}`, { method: 'PATCH', cookies: admin, body: { role: 'editor' } })).status).toBe(200);
+  });
+
+  it('is required to reset another admin\'s password, but not an editor\'s', async () => {
+    const second = await createUser(t, admin, 'second', 'admin');
+    const ed = await createUser(t, admin, 'ed');
+    const reset = (id: string, body: Record<string, unknown>) =>
+      t.request(`/api/users/${id}/password`, { method: 'PATCH', cookies: admin, body: { password: 'brand-new-password', ...body } });
+    expect((await reset(second.id, {})).status).toBe(403);
+    expect((await reset(second.id, { currentPassword: ENV_ADMIN.password })).status).toBe(200);
+    expect((await reset(ed.id, {})).status).toBe(200);
+  });
+
+  it('cannot be done with an API token, even with the right password', async () => {
+    const tokenRes = await t.request('/api/tokens', { method: 'POST', cookies: admin, body: { name: 'ci' } });
+    const { token } = await json<{ token: string }>(tokenRes);
+    const res = await create({ role: 'admin', currentPassword: ENV_ADMIN.password }, { bearer: token });
+    expect(res.status).toBe(403);
+    expect((await json(res)).code).toBe('session_required');
+  });
+
+  it('counts wrong passwords toward the sign-in rate limit', async () => {
+    for (let i = 0; i < 10; i++) await create({ role: 'admin', currentPassword: 'wrong' });
+    expect((await create({ role: 'admin', currentPassword: ENV_ADMIN.password })).status).toBe(429);
+    expect((await t.login(ENV_ADMIN.username, ENV_ADMIN.password)).res.status).toBe(429);
+  });
+
+  it('never writes the password to the audit log', async () => {
+    const ed = await createUser(t, admin, 'ed');
+    await t.request(`/api/users/${ed.id}`, { method: 'PATCH', cookies: admin, body: { role: 'admin', currentPassword: ENV_ADMIN.password } });
+    const details = t.db.prepare("SELECT details FROM audit_logs WHERE action = 'user.update'").all() as { details: string }[];
+    expect(details.length).toBeGreaterThan(0);
+    for (const d of details) expect(d.details ?? '').not.toContain(ENV_ADMIN.password);
+  });
+});
+
+describe('a session the environment admin opened before upgrading', () => {
+  it('can still grant admin access, and the environment admin is moved first so it is not locked out', async () => {
+    const t = await createTestApp();
+    const { session } = await t.login(ENV_ADMIN.username, ENV_ADMIN.password);
+    // Make it look like the session predates the upgrade: no users row yet.
+    t.db.prepare('DELETE FROM users').run();
+
+    const res = await t.request('/api/users', { method: 'POST', cookies: session, body: { username: 'second', password: 'second-password', role: 'admin', currentPassword: ENV_ADMIN.password } });
+    expect(res.status).toBe(201);
+    expect((await t.login(ENV_ADMIN.username, ENV_ADMIN.password)).res.status).toBe(200);
   });
 });

@@ -1,4 +1,4 @@
-// Password hashing for the admin account, shared by setup.mjs and hash-password.mjs.
+// Password hashing for admin accounts, shared by setup.mjs and admin-reset.mjs.
 // Must use identical parameters to hashPassword() in src/middleware/auth.ts, or the Worker
 // won't accept the hash.
 

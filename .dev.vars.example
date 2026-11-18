@@ -1,9 +1,7 @@
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD_HASH=pbkdf2:your-salt-hex:your-hash-hex
 JWT_SECRET=your-jwt-secret-hex
 
-# Generate a password hash (writes ADMIN_PASSWORD_HASH into this file once copied to .dev.vars):
-#   node scripts/hash-password.mjs yourpassword
-
-# Generate a JWT secret:
-#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# `npm run setup -- --local` generates this for you. To make one by hand:
+#   node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+#
+# Admin accounts live in the database, not here. Create one with:
+#   npm run admin:reset -- --local

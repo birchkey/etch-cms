@@ -4,29 +4,34 @@ import { authMiddleware, adminOnly, hashPassword } from '../middleware/auth';
 import { logAudit } from '../lib/audit';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate';
-import { ROLES, KEEPS_AN_ADMIN, migrateLegacyAdminIfPending } from '../lib/users';
+import { ROLES, KEEPS_AN_ADMIN, migrateLegacyAdminIfPending, normalizeRole } from '../lib/users';
+import { requirePasswordConfirmation } from '../lib/reauth';
 
 const CreateUserSchema = z.object({
   username: z.string().min(1, 'Username required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   name: z.string().optional(),
   role: z.enum(ROLES).optional(),
+  // The acting admin's own password; required when the request grants admin access.
+  currentPassword: z.string().optional(),
 });
 const UpdateUserSchema = z.object({
   name: z.string().optional(),
   must_reset_password: z.boolean().optional(),
   role: z.enum(ROLES).optional(),
+  currentPassword: z.string().optional(),
 });
 
 const LAST_ADMIN_ERROR = 'There must always be at least one admin. Make someone else an admin first.';
 const ResetPasswordSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
+  currentPassword: z.string().optional(),
 });
 const PermissionsSchema = z.object({
   contentTypeIds: z.array(z.string()),
 });
 
-const users = new Hono<{ Bindings: Env; Variables: { jwtPayload: unknown } }>();
+const users = new Hono<{ Bindings: Env; Variables: { jwtPayload: JWTPayload } }>();
 
 users.use('*', authMiddleware);
 users.use('*', adminOnly);
@@ -45,6 +50,11 @@ users.post('/', async (c) => {
   const parsed = parseBody(CreateUserSchema, raw);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const body = parsed.data;
+
+  if (body.role === 'admin') {
+    const denied = await requirePasswordConfirmation(c, body.currentPassword);
+    if (denied) return denied;
+  }
 
   const existing = await c.env.DB.prepare(
     'SELECT id FROM users WHERE username = ?'
@@ -66,7 +76,7 @@ users.post('/', async (c) => {
     'SELECT id, username, name, role, must_reset_password, created_at, updated_at FROM users WHERE id = ?'
   ).bind(id).first<Omit<UserRow, 'password_hash'>>();
 
-  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.create', 'user', id, body.username.trim(), { role: body.role ?? 'editor' }).catch(() => {});
+  void logAudit(c.env.DB, c.get('jwtPayload'), 'user.create', 'user', id, body.username.trim(), { role: body.role ?? 'editor' }).catch(() => {});
   return c.json(user, 201);
 });
 
@@ -86,7 +96,11 @@ users.patch('/:id', async (c) => {
   if (parsed.data.must_reset_password !== undefined) { updates.push('must_reset_password = ?'); bindings.push(parsed.data.must_reset_password ? 1 : 0); }
   const roleChanged = parsed.data.role !== undefined && parsed.data.role !== user.role;
   if (roleChanged) { updates.push('role = ?'); bindings.push(parsed.data.role); }
-  if (roleChanged && parsed.data.role === 'admin') await migrateLegacyAdminIfPending(c.env);
+  if (roleChanged && parsed.data.role === 'admin') {
+    const denied = await requirePasswordConfirmation(c, parsed.data.currentPassword);
+    if (denied) return denied;
+    await migrateLegacyAdminIfPending(c.env);
+  }
   if (updates.length === 0) return c.json({ error: 'Nothing to update' }, 400);
   updates.push('updated_at = ?'); bindings.push(Date.now()); bindings.push(id);
 
@@ -105,19 +119,27 @@ users.patch('/:id', async (c) => {
   const updated = await c.env.DB.prepare(
     'SELECT id, username, name, role, must_reset_password, created_at, updated_at FROM users WHERE id = ?'
   ).bind(id).first<Omit<UserRow, 'password_hash'>>();
-  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.update', 'user', id, user.username, parsed.data).catch(() => {});
+  // Never record the confirming password in the audit log.
+  const { currentPassword: _omit, ...changes } = parsed.data;
+  void logAudit(c.env.DB, c.get('jwtPayload'), 'user.update', 'user', id, user.username, changes).catch(() => {});
   return c.json(updated);
 });
 
 // PATCH /api/users/:id/password — reset password
 users.patch('/:id/password', async (c) => {
   const { id } = c.req.param();
-  const user = await c.env.DB.prepare('SELECT id, username FROM users WHERE id = ?').bind(id).first<{ id: string; username: string }>();
+  const user = await c.env.DB.prepare('SELECT id, username, role FROM users WHERE id = ?').bind(id).first<{ id: string; username: string; role: string }>();
   if (!user) return c.json({ error: 'Not found' }, 404);
 
   const raw = await c.req.json().catch(() => null);
   const pwParsed = parseBody(ResetPasswordSchema, raw);
   if (!pwParsed.ok) return c.json({ error: pwParsed.error }, 400);
+
+  // Setting another admin's password amounts to signing in as them.
+  if (normalizeRole(user.role) === 'admin') {
+    const denied = await requirePasswordConfirmation(c, pwParsed.data.currentPassword);
+    if (denied) return denied;
+  }
 
   const passwordHash = await hashPassword(pwParsed.data.password);
   const now = Date.now();
@@ -128,7 +150,7 @@ users.patch('/:id/password', async (c) => {
   // Revoke all active sessions — forces re-login on all devices
   await c.env.DB.prepare('DELETE FROM refresh_tokens WHERE user_sub = ?').bind(user.username).run();
 
-  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.reset_password', 'user', id, user.username).catch(() => {});
+  void logAudit(c.env.DB, c.get('jwtPayload'), 'user.reset_password', 'user', id, user.username).catch(() => {});
   return c.json({ ok: true });
 });
 
@@ -137,7 +159,7 @@ users.delete('/:id', async (c) => {
   const { id } = c.req.param();
   const user = await c.env.DB.prepare('SELECT id, username FROM users WHERE id = ?').bind(id).first<{ id: string; username: string }>();
   if (!user) return c.json({ error: 'Not found' }, 404);
-  if (user.username === (c.get('jwtPayload') as JWTPayload).sub) {
+  if (user.username === (c.get('jwtPayload')).sub) {
     return c.json({ error: 'You cannot delete your own account' }, 403);
   }
   const deleted = await c.env.DB.prepare(`DELETE FROM users WHERE id = ? AND ${KEEPS_AN_ADMIN}`).bind(id, id).run();
@@ -148,7 +170,7 @@ users.delete('/:id', async (c) => {
     c.env.DB.prepare('DELETE FROM api_tokens WHERE owner_sub = ?').bind(user.username),
     c.env.DB.prepare('DELETE FROM refresh_tokens WHERE user_sub = ?').bind(user.username),
   ]);
-  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.delete', 'user', id, user.username).catch(() => {});
+  void logAudit(c.env.DB, c.get('jwtPayload'), 'user.delete', 'user', id, user.username).catch(() => {});
   return c.json({ ok: true });
 });
 
@@ -187,7 +209,7 @@ users.put('/:id/permissions', async (c) => {
   ];
   await c.env.DB.batch(stmts);
 
-  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.permissions_update', 'user', id, user.username, { contentTypeIds }).catch(() => {});
+  void logAudit(c.env.DB, c.get('jwtPayload'), 'user.permissions_update', 'user', id, user.username, { contentTypeIds }).catch(() => {});
   return c.json({ contentTypeIds });
 });
 

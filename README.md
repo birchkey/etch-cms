@@ -318,13 +318,14 @@ npm run setup
 1. Logs you in to Cloudflare if needed (and asks which account to use if you have several).
 2. Writes `wrangler.toml` from `wrangler.example.toml`.
 3. Creates the D1 database and R2 bucket.
-4. Hashes your password, generates a JWT signing secret, and saves both to `.dev.vars` for local development and to your Worker's secrets for production.
-5. Runs database migrations locally and in production.
-6. Builds the admin UI and deploys.
+4. Runs database migrations locally and in production.
+5. Creates your admin account in both databases.
+6. Generates a JWT signing secret: one in `.dev.vars` for local development and a separate one in your Worker's secrets for production.
+7. Builds the admin UI and deploys.
 
-Your CMS will be live at `https://<name>.<your-subdomain>.workers.dev`. Sign in with the admin login you chose.
+Your CMS will be live at `https://<name>.<your-subdomain>.workers.dev`. Sign in with the admin account you created.
 
-Setup is safe to re-run. It reuses anything that already exists, offers to change the admin login, and never replaces production's `JWT_SECRET` (that would sign everyone out and break preview links and signed asset URLs).
+Setup is safe to re-run. It reuses anything that already exists, offers to add an admin or reset a password, and never replaces production's `JWT_SECRET` (that would sign everyone out and break preview links and signed asset URLs).
 
 To set up **local development only**, with no Cloudflare account, run `npm run setup -- --local`.
 
@@ -373,18 +374,15 @@ npx wrangler d1 create <database-name>
 npx wrangler r2 bucket create <bucket-name>
 
 # Local development
-cp .dev.vars.example .dev.vars
-node scripts/hash-password.mjs <password>   # writes ADMIN_PASSWORD_HASH to .dev.vars
-# also set JWT_SECRET in .dev.vars:
+cp .dev.vars.example .dev.vars   # then set JWT_SECRET to a random value:
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 npm run db:migrate
+npm run admin:reset -- --local   # create your local admin
 
 # Production
-npx wrangler secret put ADMIN_USERNAME
-node scripts/hash-password.mjs --print <password>   # paste the output at the next prompt
-npx wrangler secret put ADMIN_PASSWORD_HASH
-npx wrangler secret put JWT_SECRET                  # a new random value, not the local one
+npx wrangler secret put JWT_SECRET   # a new random value, not the local one
 npm run deploy
+npm run admin:reset                  # create your production admin
 ```
 
 `wrangler.toml` needs no `database_id`: Wrangler finds the database by name.

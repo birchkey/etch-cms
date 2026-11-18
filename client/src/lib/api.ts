@@ -119,16 +119,17 @@ export interface CmsUser {
 
 export const usersApi = {
   list: () => request<CmsUser[]>('/users'),
-  create: (username: string, password: string, name: string | undefined, role: UserRole) =>
-    request<CmsUser>('/users', { method: 'POST', body: JSON.stringify({ username, password, name, role }) }),
-  setRole: (id: string, role: UserRole) =>
-    request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  // currentPassword is the signed-in admin's own password, required when granting admin access.
+  create: (username: string, password: string, name: string | undefined, role: UserRole, currentPassword?: string) =>
+    request<CmsUser>('/users', { method: 'POST', body: JSON.stringify({ username, password, name, role, currentPassword }) }),
+  setRole: (id: string, role: UserRole, currentPassword?: string) =>
+    request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role, currentPassword }) }),
   updateName: (id: string, name: string) =>
     request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   setMustReset: (id: string, mustReset: boolean) =>
     request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ must_reset_password: mustReset }) }),
-  resetPassword: (id: string, password: string) =>
-    request<{ ok: true }>(`/users/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password }) }),
+  resetPassword: (id: string, password: string, currentPassword?: string) =>
+    request<{ ok: true }>(`/users/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password, currentPassword }) }),
   delete: (id: string) => request<{ ok: true }>(`/users/${id}`, { method: 'DELETE' }),
   getPermissions: (id: string) =>
     request<{ contentTypeIds: string[] }>(`/users/${id}/permissions`),

@@ -238,18 +238,20 @@ function CreateUserDialog({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('editor');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const user = await usersApi.create(username, password, name, role);
+      const user = await usersApi.create(username, password, name, role, role === 'admin' ? currentPassword : undefined);
       toast.success(`${roleLabel(user.role)} "${user.name || user.username}" created`);
       setName('');
       setUsername('');
       setPassword('');
       setRole('editor');
+      setCurrentPassword('');
       onCreated(user);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create user');
@@ -295,6 +297,13 @@ function CreateUserDialog({
             />
           </div>
           <RoleField value={role} onChange={setRole} />
+          {role === 'admin' && (
+            <ConfirmPasswordField
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              reason="Creating an admin needs your password."
+            />
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
@@ -494,17 +503,20 @@ function PermissionsDialog({ user, onClose }: { user: CmsUser | null; onClose: (
 
 function ResetPasswordDialog({ user, onClose, onReset }: { user: CmsUser | null; onClose: () => void; onReset?: (updated: CmsUser) => void }) {
   const [password, setPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const targetIsAdmin = user?.role === 'admin';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
     setSaving(true);
     try {
-      await usersApi.resetPassword(user.id, password);
+      await usersApi.resetPassword(user.id, password, targetIsAdmin ? currentPassword : undefined);
       toast.success('Password updated — user will be required to reset on next login');
       onReset?.({ ...user, must_reset_password: 1 });
       setPassword('');
+      setCurrentPassword('');
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to reset password');
@@ -532,6 +544,13 @@ function ResetPasswordDialog({ user, onClose, onReset }: { user: CmsUser | null;
               minLength={8}
             />
           </div>
+          {targetIsAdmin && (
+            <ConfirmPasswordField
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              reason="Resetting an admin's password needs your password."
+            />
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
@@ -574,23 +593,26 @@ function ChangeRoleDialog({
 }) {
   const { logout } = useAuth();
   const [role, setRole] = useState<UserRole>('editor');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Seed from the user being opened, during render so the previous user's role never shows.
   const [seededUser, setSeededUser] = useState(user);
   if (seededUser !== user) {
     setSeededUser(user);
+    setCurrentPassword('');
     if (user) setRole(user.role);
   }
 
   const unchanged = !!user && role === user.role;
+  const promoting = !unchanged && role === 'admin';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || unchanged) return;
     setSaving(true);
     try {
-      const updated = await usersApi.setRole(user.id, role);
+      const updated = await usersApi.setRole(user.id, role, promoting ? currentPassword : undefined);
       if (isSelf) {
         // Your session was ended by the change; sign in again to pick up the new role.
         toast.success(`You're now ${role === 'admin' ? 'an admin' : 'an editor'}. Sign in again to continue.`);
@@ -619,6 +641,13 @@ function ChangeRoleDialog({
               This is your own account. You'll lose admin access and be signed out.
             </p>
           )}
+          {promoting && (
+            <ConfirmPasswordField
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              reason="Making someone an admin needs your password."
+            />
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving || unchanged}>
@@ -629,5 +658,23 @@ function ChangeRoleDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// The signed-in admin's own password, asked for before granting admin access.
+function ConfirmPasswordField({ value, onChange, reason }: { value: string; onChange: (v: string) => void; reason: string }) {
+  return (
+    <div className="space-y-1.5 rounded-md bg-zinc-50 border border-zinc-200 p-3">
+      <Label htmlFor="confirm-password">Your password</Label>
+      <Input
+        id="confirm-password"
+        type="password"
+        autoComplete="current-password"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        required
+      />
+      <p className="text-xs text-zinc-500">{reason}</p>
+    </div>
   );
 }

@@ -177,7 +177,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           )}
           <p className="text-xs text-zinc-500 capitalize">{role}</p>
         </div>
-        {role === 'editor' && (
+        {role && (
           <button
             onClick={() => setChangePwOpen(true)}
             className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
