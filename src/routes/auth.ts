@@ -153,9 +153,25 @@ auth.post('/refresh', async (c) => {
   // Delete old token and issue new ones (rotation)
   await c.env.DB.prepare('DELETE FROM refresh_tokens WHERE id = ?').bind(row.id).run();
 
+  // Re-resolve the user on every refresh, so deleting a user or changing their role takes
+  // effect within one access-token lifetime instead of surviving on rotated refresh tokens.
+  let identity: { role: 'admin' | 'editor'; name?: string };
+  if (row.user_role === 'admin' && row.user_sub === c.env.ADMIN_USERNAME) {
+    identity = { role: 'admin' };
+  } else {
+    const user = await c.env.DB.prepare(
+      'SELECT username, name, role, created_at FROM users WHERE username = ?'
+    ).bind(row.user_sub).first<Pick<UserRow, 'username' | 'name' | 'role' | 'created_at'>>();
+    // A token older than the account belongs to an earlier, deleted user with the same name.
+    if (!user || row.created_at < user.created_at) {
+      clearAuthCookies(c);
+      return c.json({ error: 'Invalid or expired refresh token' }, 401);
+    }
+    identity = { role: user.role, name: user.name || undefined };
+  }
+
   const { token, refreshToken: newRefreshToken } = await createTokens(
-    c.env.DB, c.env.JWT_SECRET,
-    row.user_sub, row.user_role as 'admin' | 'editor', row.user_name ?? undefined,
+    c.env.DB, c.env.JWT_SECRET, row.user_sub, identity.role, identity.name,
   );
 
   setAuthCookies(c, token, newRefreshToken);

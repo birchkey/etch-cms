@@ -46,10 +46,11 @@ export async function verifyApiToken(
   if (row.owner_sub === env.ADMIN_USERNAME) {
     identity = { sub: row.owner_sub, role: 'admin', iat: 0, exp: 0, token_id: row.id };
   } else {
-    const user = await env.DB.prepare('SELECT username, name, role FROM users WHERE username = ?')
-      .bind(row.owner_sub).first<{ username: string; name: string; role: 'editor' }>();
-    // Owner deleted, or this was an admin token and ADMIN_USERNAME has since changed.
-    if (!user) return null;
+    const user = await env.DB.prepare('SELECT username, name, role, created_at FROM users WHERE username = ?')
+      .bind(row.owner_sub).first<{ username: string; name: string; role: 'editor'; created_at: number }>();
+    // Owner deleted, or this was an admin token and ADMIN_USERNAME has since changed. A token
+    // older than the account belongs to an earlier, deleted user with the same name.
+    if (!user || row.created_at < user.created_at) return null;
     identity = { sub: user.username, role: user.role, name: user.name || undefined, iat: 0, exp: 0, token_id: row.id };
   }
 
