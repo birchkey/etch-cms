@@ -14,17 +14,21 @@ auditLog.get('/', async (c) => {
   const offset = (page - 1) * limit;
   const resourceType = c.req.query('resource_type') ?? '';
 
-  const VALID_TYPES = new Set(['entry', 'content_type', 'asset']);
-  const whereClause = VALID_TYPES.has(resourceType) ? 'WHERE resource_type = ?' : '';
+  const VALID_TYPES = new Set(['entry', 'content_type', 'asset', 'user']);
+  const whereClause = VALID_TYPES.has(resourceType) ? 'WHERE a.resource_type = ?' : '';
   const bindings: unknown[] = VALID_TYPES.has(resourceType) ? [resourceType] : [];
 
   const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) as count FROM audit_logs ${whereClause}`
+    `SELECT COUNT(*) as count FROM audit_logs a ${whereClause}`
   ).bind(...bindings).first<{ count: number }>();
   const total = countRow?.count ?? 0;
 
   const { results } = await c.env.DB.prepare(
-    `SELECT * FROM audit_logs ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`
+    // actor_deleted marks entries made by an account that has since been deleted, which a
+    // username alone can't show once that username belongs to someone else.
+    `SELECT a.*, (a.actor_user_id IS NOT NULL AND u.id IS NULL) AS actor_deleted
+     FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id
+     ${whereClause} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`
   ).bind(...bindings, limit, offset).all();
 
   const pages = Math.ceil(total / limit);

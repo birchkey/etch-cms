@@ -21,6 +21,12 @@ const ACTION_LABELS: Record<string, string> = {
   'asset.delete': 'Deleted asset',
   'api_token.create': 'Created API token',
   'api_token.revoke': 'Revoked API token',
+  'user.create': 'Added user',
+  'user.update': 'Updated user',
+  'user.delete': 'Removed user',
+  'user.reset_password': 'Reset password for',
+  'user.permissions_update': 'Changed permissions for',
+  'user.migrate_admin': 'Moved the environment admin into the database:',
 };
 
 const FILTER_TABS: [string, string][] = [
@@ -28,6 +34,7 @@ const FILTER_TABS: [string, string][] = [
   ['entry', 'Entries'],
   ['content_type', 'Content Types'],
   ['asset', 'Assets'],
+  ['user', 'Users'],
 ];
 
 function formatVal(val: unknown): string {
@@ -108,6 +115,14 @@ export default function AuditLogPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-zinc-900 truncate">
                   <span className="font-medium">{log.actor_name ?? log.actor_id}</span>
+                  {log.actor_deleted === 1 && (
+                    <span
+                      className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-500 align-middle"
+                      title="This account has since been deleted. A current user may have the same username."
+                    >
+                      deleted account
+                    </span>
+                  )}
                   {' '}
                   <span className="text-zinc-500">{ACTION_LABELS[log.action] ?? log.action}</span>
                   {log.resource_label && (

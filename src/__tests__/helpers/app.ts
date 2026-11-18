@@ -6,6 +6,7 @@ import userRoutes from '../../routes/users';
 import assetRoutes from '../../routes/assets';
 import apiTokenRoutes from '../../routes/api-tokens';
 import contentTypeRoutes from '../../routes/content-types';
+import auditLogRoutes from '../../routes/audit-log';
 import { hashPassword } from '../../middleware/auth';
 import { createTestD1 } from './d1';
 import type { Env } from '../../types';
@@ -28,6 +29,7 @@ export async function createTestApp() {
   app.route('/api/assets', assetRoutes);
   app.route('/api/tokens', apiTokenRoutes);
   app.route('/api/content-types', contentTypeRoutes);
+  app.route('/api/audit-logs', auditLogRoutes);
 
   const pending: Promise<unknown>[] = [];
   const ctx = {

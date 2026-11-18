@@ -397,6 +397,10 @@ export const apiTokensApi = {
 export interface AuditLog {
   id: string;
   actor_id: string;
+  // The account that acted; null for entries from before this was recorded.
+  actor_user_id: string | null;
+  // 1 when that account has since been deleted (its username may now be someone else's).
+  actor_deleted: number;
   actor_name: string | null;
   actor_role: 'admin' | 'editor';
   action: string;
