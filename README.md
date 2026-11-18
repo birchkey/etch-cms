@@ -545,21 +545,121 @@ GET    /api/preview/:token
 
 ---
 
+## Importing Content
+
+How to load content through the admin API, for example when migrating from another site. Authenticate with an [API token](#admin-api-reference). Creating content types needs an admin's token; creating entries and uploading assets works with an editor's.
+
+### Order of operations
+
+1. **Read the schema.** `GET /api/content-types` lists types; `GET /api/content-types/:id` returns each field's `slug`, `type`, `required`, `multiple`, `select_options`, `relation_content_type_id` and `repeater_subfields`. Entry values are keyed by field `slug`.
+2. **Create content types** if they don't exist yet (admin). Create types that others relate to first, since a relation field needs the target type's ID.
+3. **Upload assets** and keep a map from old URL to new path (see [Assets](#assets)).
+4. **Create entries.** Create entries that others relate to first, and keep a map from old ID to new ID so relation fields can be filled in.
+5. **Publish.** Entries are always created as drafts; publish each one separately.
+
+### Create a content type (admin)
+
+```http
+POST /api/content-types
+{
+  "name": "Blog Posts",
+  "slug": "blog-posts",
+  "fields": [
+    { "name": "Title", "type": "text", "required": true },
+    { "name": "Body", "type": "rich_text" },
+    { "name": "Cover", "type": "image" },
+    { "name": "Category", "type": "select", "select_options": "[\"News\",\"Guides\"]" },
+    { "name": "Author", "type": "relation", "relation_content_type_id": "<authors type id>", "relation_cardinality": "one" }
+  ]
+}
+```
+
+Field slugs default to the name in `snake_case` (`"Cover Image"` → `cover_image`). Set `"multiple": true` on `image` or `select` fields that hold several values. `select_options` and `repeater_subfields` are **JSON-encoded strings**, not arrays. Add `"is_singleton": true` for a global. Other per-field options (`min_length`, `max_length`, `min_value`, `max_value`, `pattern`, `phone_format`, `helper_text`) match the field editor.
+
+### Create and publish an entry
+
+```http
+POST /api/entries
+{
+  "content_type_id": "<type id>",
+  "slug": "my-first-post",
+  "fields": {
+    "title": "My First Post",
+    "body": "<p>Hello <strong>world</strong></p><img src=\"/r2/abc123.jpg\">",
+    "cover": "/r2/abc123.jpg",
+    "category": "News",
+    "author": "<author entry id>"
+  }
+}
+```
+
+The response is the created entry; use its `id` to publish:
+
+```http
+PATCH /api/entries/:id/publish
+```
+
+- `slug` is optional and is normalised to lowercase-with-hyphens. A slug already used in that content type returns **409**, which makes it a natural key for re-runnable imports: look an entry up first with `GET /api/content-types/:typeId/entries?q=<slug>` (a substring search over slugs and field values, so compare `slug` exactly; paginated with `page` and `limit`, up to 1000 per page) and update it with `PUT /api/entries/:id` (same body, without `content_type_id`) instead of creating a duplicate.
+- **Field values aren't validated when an entry is created or updated.** Unknown field slugs are silently dropped, and required fields, lengths, ranges and patterns are only checked when publishing. A publish that fails returns **400** with a `fieldErrors` object keyed by field slug. Publishing an entry that links to unpublished entries succeeds but returns a `warnings` array, and those links are left out of the public API until the related entries are published.
+- **Globals** can't be created with `POST /api/entries` (it returns 409). `GET /api/content-types/:typeId/singleton` returns the global's one entry; fill it with `PUT /api/entries/:id`, then publish.
+- To keep an entry unpublished until a date, use `PATCH /api/entries/:id/schedule` with `{ "scheduled_at": <Unix ms> }` instead of publishing.
+
+### Field values to send
+
+Values you **write** are not always in the shape the public API **returns** (see [Field Types](#field-types)). Send:
+
+| Type | Send | Example |
+|------|------|---------|
+| `text`, `email`, `phone` | string | `"hello@example.com"` |
+| `rich_text` | HTML string; reference uploaded images as `/r2/<filename>` | `"<p>Hi</p><img src=\"/r2/abc123.jpg\">"` |
+| `image` | path `/r2/<filename>`; array of paths when `multiple` | `"/r2/abc123.jpg"` |
+| `number` | number | `42` |
+| `boolean` | boolean | `true` |
+| `datetime` | `{ datetime, timezone }`, wall-clock time without seconds or offset, plus an IANA timezone | `{ "datetime": "2025-06-01T09:30", "timezone": "America/Chicago" }` |
+| `select` | one of the field's options; array when `multiple` | `"News"` |
+| `relation` | entry ID (`one`) or array of entry IDs (`many`) | `"7c9e…"` |
+| `color` | hex string | `"#ff5733"` |
+| `icon` | Font Awesome classes, `fa-<style> fa-<name>` | `"fa-solid fa-house"` |
+| `repeater` | array of objects keyed by subfield slug, each with a unique `_id` | `[{ "_id": "<uuid>", "label": "Docs", "link": "https://…" }]` |
+
+Send `null` to clear a field. On `PUT`, fields you leave out keep their current value.
+
+### Assets
+
+Upload a file with a multipart request. The declared type must match the file's content, and the size limit is set in **Settings** (50 MB by default):
+
+```bash
+curl https://your-worker.workers.dev/api/assets \
+  -H "Authorization: Bearer etch_…" \
+  -F "file=@photo.jpg;type=image/jpeg" \
+  -F "alt_text=Front of the building"
+```
+
+Accepted types are JPEG, PNG, GIF, WebP, AVIF, SVG, ICO, PDF, MP4 and WebM. The response includes the asset's `filename`; the value to put in an `image` field or a rich-text `src` is `/r2/<filename>`.
+
+For a large library, copy the files into the R2 bucket under `assets/` first (with `wrangler r2 object put` or rclone), then add each one to the asset library with `POST /api/assets/register` and `{ "r2_key": "assets/<filename>", "alt_text": "…" }`. That avoids sending every file through the Worker.
+
+---
+
 ## Field Types
+
+What the public API returns for each field type. To write values through the admin API, see [Field values to send](#field-values-to-send). An empty field is `null`.
 
 | Type | API value | Notes |
 |------|-----------|-------|
 | `text` | `string` | Plain text |
-| `rich_text` | `string` (HTML) | Headings get auto-generated `id` attributes; image paths are absolute |
-| `image` | `{ url, alt_text }` or array | Any asset — image, PDF, video. Labelled **Image / Asset** in the editor. `url` is signed and expires in an hour unless the asset is marked public. Single or multiple when `multiple: true` |
+| `rich_text` | `string` (HTML) | Headings get auto-generated `id` attributes; image URLs are absolute (and signed, like `image`) |
+| `image` | `{ url, alt_text }` or array | Any asset — image, PDF, video. Labelled **Image / Asset** in the editor. `url` is signed and expires in an hour unless the asset is marked public. An array when `multiple: true` |
 | `number` | `number` | |
-| `datetime` | `string` (ISO 8601) | |
+| `datetime` | `{ iso, long, date, time, timestamp, timezone }` | `iso` is the wall-clock time as entered, without an offset (`"2025-06-01T09:30"`). `long`, `date` and `time` are display strings (`"June 1, 2025 at 9:30 AM"`, `"June 1, 2025"`, `"9:30 AM"`). `timestamp` is Unix seconds, adjusted for `timezone` (an IANA name, or `null` if none was stored) |
 | `boolean` | `boolean` | |
-| `relation` | entry object or array | Resolved inline; only published related entries are included |
-| `select` | `string` | One value from a defined set of options |
+| `relation` | entry object or array | `{ id, status, published_at, created_at, updated_at, fields }`, resolved inline. An array when the cardinality is `many`. Only published related entries are included. Resolved one level deep: relation fields inside a related entry are returned as raw entry IDs |
+| `select` | `string` or array | One value from a defined set of options; an array when `multiple: true` |
 | `email` | `string` | Email address |
 | `phone` | `string` | Phone number; a sibling `{slug}_digits` key with only numeric characters is also included |
 | `color` | `string` | Hex color value (e.g. `#ff5733`) |
+| `icon` | `{ class, glyph }` | `class` is the Font Awesome class string (`"fa-solid fa-house"`); `glyph` is the icon's Unicode character for use with the Font Awesome font, or `null` if unknown |
+| `repeater` | array of objects | One object per item: `_id` plus a key per subfield slug. Subfield values use the formats above (an `image` subfield returns `{ url, alt_text }`, a `datetime` subfield the datetime object, and so on) |
 
 ---
 
