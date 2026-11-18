@@ -615,6 +615,21 @@ export default function EntryForm({ singleton = false }: EntryFormProps) {
 
       {/* Content */}
       <div className="flex-1 p-4 md:p-8 max-w-3xl mx-auto w-full">
+        {/* Globals are always published, so saved edits sit in the draft table and the public
+            API keeps serving the old values. Spell that out — a toolbar button is easy to miss. */}
+        {singleton && isPublished && hasUnpublishedChanges && (
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <AlertCircle className="hidden sm:block h-5 w-5 shrink-0 text-amber-600" />
+            <div className="flex-1 text-sm">
+              <p className="font-medium text-amber-800">Your changes aren't live yet</p>
+              <p className="text-amber-700">They're saved, but your site will keep showing the previous values until you publish.</p>
+            </div>
+            <Button size="sm" onClick={handlePublish} disabled={publishing} className="shrink-0">
+              {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Globe className="h-4 w-4 mr-2" />}
+              Publish Changes
+            </Button>
+          </div>
+        )}
         {fields.length === 0 ? (
           <div className="text-center py-20 text-zinc-400">
             <p>This content type has no fields.</p>

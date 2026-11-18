@@ -187,6 +187,8 @@ GET https://your-worker.workers.dev/api/public/site-contact/first
 
 Bind this to a Webstudio Resource once and reference it from your header, footer, and contact page. Globals are provisioned already published, so this endpoint never 404s once the content type exists — an unfilled global returns `null` fields rather than an error.
 
+Like any published entry, edits to a global are saved as a draft and only reach the public API when you click **Publish Changes**. Until then the endpoint keeps returning the previous values, which for a newly created global means `null` fields. The global's editor shows a banner while changes are waiting to be published.
+
 Create as many globals as you have distinct concerns (Contact Info, Social Links, SEO Defaults, Footer) — separate types keep each payload small and let you grant editors access per-global. `GET /api/public/:typeSlug` still works on a global and returns a one-item list, so nothing breaks if you convert an existing single-entry collection.
 
 ### Trigger a Webstudio rebuild on publish
