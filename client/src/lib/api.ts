@@ -105,11 +105,13 @@ export const authApi = {
 };
 
 // Users (admin only)
+export type UserRole = 'admin' | 'editor';
+
 export interface CmsUser {
   id: string;
   username: string;
   name: string;
-  role: 'editor';
+  role: UserRole;
   must_reset_password: number;
   created_at: number;
   updated_at: number;
@@ -117,8 +119,10 @@ export interface CmsUser {
 
 export const usersApi = {
   list: () => request<CmsUser[]>('/users'),
-  create: (username: string, password: string, name?: string) =>
-    request<CmsUser>('/users', { method: 'POST', body: JSON.stringify({ username, password, name }) }),
+  create: (username: string, password: string, name: string | undefined, role: UserRole) =>
+    request<CmsUser>('/users', { method: 'POST', body: JSON.stringify({ username, password, name, role }) }),
+  setRole: (id: string, role: UserRole) =>
+    request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
   updateName: (id: string, name: string) =>
     request<CmsUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   setMustReset: (id: string, mustReset: boolean) =>

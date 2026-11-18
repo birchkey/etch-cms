@@ -336,13 +336,30 @@ npm run deploy
 
 This builds the admin UI, applies any pending migrations to production, and deploys the Worker.
 
+### Admins and account recovery
+
+Users are **admins** or **editors**, and you manage both under **Users** in the sidebar. Editors create and edit entries and assets, and can be limited to specific content types. Admins can also manage users, content types, settings, webhooks and the audit log. There is always at least one admin: Etch refuses to demote or delete the last one.
+
+Role changes and deletions take effect on the user's next request, including requests made with their API tokens.
+
+**Locked out?** If no one can sign in as an admin, reset one from a terminal signed in to your Cloudflare account:
+
+```bash
+npm run admin:reset              # production
+npm run admin:reset -- --local   # local development database
+```
+
+It asks for a username and a new password, then creates that admin or resets their password, and signs them out everywhere. If the username belongs to an editor, they become an admin. It writes straight to your D1 database, so it works even when nobody can sign in. It's safe because only someone with access to your Cloudflare account can run it, and that person already controls the CMS.
+
+> **Upgrading from 0.1.x:** admins used to be defined by the `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` secrets. After you deploy this version, the first time that admin signs in, they're copied into the database as a regular admin. From then on the secrets are ignored, and you can delete them with `npx wrangler secret delete ADMIN_USERNAME` and `npx wrangler secret delete ADMIN_PASSWORD_HASH`. If an editor already uses the admin's username, that sign-in is refused; run `npm run admin:reset` instead.
+
 ### Secrets
 
 Setup sets the required secrets for you. To change them later:
 
 | Secret | Purpose |
 |--------|---------|
-| `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` | Admin login. Re-run `npm run setup` to change them, or set the hash yourself with `node scripts/hash-password.mjs --print <password>` and `npx wrangler secret put ADMIN_PASSWORD_HASH`. |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` | **Retired.** Only used to move an existing admin into the database on upgrade (see [Admins and account recovery](#admins-and-account-recovery)). |
 | `JWT_SECRET` | Signs sessions, preview links and signed asset URLs. Changing it signs everyone out and invalidates links already issued. |
 | `PUBLIC_API_KEY` | Optional. When set, every public API request must send it as `Authorization: Bearer <key>`. Set it with `npx wrangler secret put PUBLIC_API_KEY`. |
 
@@ -424,7 +441,7 @@ That exports production to `./prod-backup.sql`, wipes the local D1 state, and im
 export in its place. The export includes the full schema and data, so you don't need to
 re-run migrations afterward. Pass a different path with `npm run db:pull -- ./other.sql`.
 
-**Note:** Secrets (`ADMIN_PASSWORD_HASH`, `JWT_SECRET`, etc.) are stored as Wrangler secrets, not in the database, so the export contains no credentials. Your local login still uses the values in `.dev.vars`.
+**Note:** The export includes the `users` table, so after a pull your local logins are the same as production's. It contains password hashes, not passwords, but treat the file as sensitive. Secrets such as `JWT_SECRET` are stored as Wrangler secrets, not in the database, so they aren't in the export.
 
 `prod-backup.sql` is gitignored — don't commit it, especially if your content includes user-submitted data.
 
@@ -468,7 +485,7 @@ curl https://your-worker.workers.dev/api/content-types \
   -H "Authorization: Bearer etch_…"
 ```
 
-A token acts as the user who created it, with the same role and content-type permissions, checked on every request. Deleting the user or changing their permissions takes effect immediately. Tokens are shown once at creation, stored only as a hash, can be set to expire, and can be revoked by their owner or any admin. Changes made with a token are recorded in the activity log with the token's ID. A token can't create other tokens or change a password; those require signing in.
+A token acts as the user who created it, with the same role and content-type permissions, checked on every request. Deleting the user or changing their role or permissions takes effect immediately. Tokens are shown once at creation, stored only as a hash, can be set to expire, and can be revoked by their owner or any admin. Changes made with a token are recorded in the activity log with the token's ID. A token can't create other tokens or change a password; those require signing in.
 
 Editors can create and edit entries. Admins can additionally manage content types, users, webhooks, and settings.
 

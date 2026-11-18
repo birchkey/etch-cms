@@ -53,6 +53,8 @@ SQLite 3.26+ automatically rewrites FK references in other tables when a table i
 
 The `type` CHECK constraint was removed from the `fields` table in migration `0004` — type validation is enforced by Zod at the API layer instead. This means **adding new field types requires only code changes, no migration**.
 
+Migration `0012` did the same for `users.role`: roles are validated by Zod, and code treats any unrecognised role as an editor, so **adding a role requires only code changes**.
+
 Two CHECK constraints remain that could require table recreation if expanded:
 
 | Table | Column | Constraint |

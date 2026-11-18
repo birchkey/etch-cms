@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "admin:reset": "node scripts/admin-reset.mjs",
     "postinstall": "npm --prefix client install --no-audit --no-fund",
     "predev": "node -e \"require('node:fs').mkdirSync('client/dist',{recursive:true})\"",
     "dev": "wrangler dev",

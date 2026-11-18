@@ -4,16 +4,21 @@ import { authMiddleware, adminOnly, hashPassword } from '../middleware/auth';
 import { logAudit } from '../lib/audit';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate';
+import { ROLES, KEEPS_AN_ADMIN, migrateLegacyAdminIfPending } from '../lib/users';
 
 const CreateUserSchema = z.object({
   username: z.string().min(1, 'Username required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   name: z.string().optional(),
+  role: z.enum(ROLES).optional(),
 });
 const UpdateUserSchema = z.object({
   name: z.string().optional(),
   must_reset_password: z.boolean().optional(),
+  role: z.enum(ROLES).optional(),
 });
+
+const LAST_ADMIN_ERROR = 'There must always be at least one admin. Make someone else an admin first.';
 const ResetPasswordSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
@@ -46,6 +51,8 @@ users.post('/', async (c) => {
   ).bind(body.username).first();
   if (existing) return c.json({ error: 'Username already taken' }, 409);
 
+  if (body.role === 'admin') await migrateLegacyAdminIfPending(c.env);
+
   const id = crypto.randomUUID();
   const passwordHash = await hashPassword(body.password);
   const now = Date.now();
@@ -53,20 +60,20 @@ users.post('/', async (c) => {
 
   await c.env.DB.prepare(
     'INSERT INTO users (id, username, name, password_hash, role, must_reset_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
-  ).bind(id, body.username.trim(), name, passwordHash, 'editor', now, now).run();
+  ).bind(id, body.username.trim(), name, passwordHash, body.role ?? 'editor', now, now).run();
 
   const user = await c.env.DB.prepare(
     'SELECT id, username, name, role, must_reset_password, created_at, updated_at FROM users WHERE id = ?'
   ).bind(id).first<Omit<UserRow, 'password_hash'>>();
 
-  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.create', 'user', id, body.username.trim()).catch(() => {});
+  void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.create', 'user', id, body.username.trim(), { role: body.role ?? 'editor' }).catch(() => {});
   return c.json(user, 201);
 });
 
-// PATCH /api/users/:id — update name and/or must_reset_password flag
+// PATCH /api/users/:id — update name, role and/or must_reset_password flag
 users.patch('/:id', async (c) => {
   const { id } = c.req.param();
-  const user = await c.env.DB.prepare('SELECT id, username FROM users WHERE id = ?').bind(id).first<{ id: string; username: string }>();
+  const user = await c.env.DB.prepare('SELECT id, username, role FROM users WHERE id = ?').bind(id).first<{ id: string; username: string; role: string }>();
   if (!user) return c.json({ error: 'Not found' }, 404);
 
   const raw = await c.req.json().catch(() => null);
@@ -77,10 +84,23 @@ users.patch('/:id', async (c) => {
   const bindings: unknown[] = [];
   if (parsed.data.name !== undefined) { updates.push('name = ?'); bindings.push(parsed.data.name.trim()); }
   if (parsed.data.must_reset_password !== undefined) { updates.push('must_reset_password = ?'); bindings.push(parsed.data.must_reset_password ? 1 : 0); }
+  const roleChanged = parsed.data.role !== undefined && parsed.data.role !== user.role;
+  if (roleChanged) { updates.push('role = ?'); bindings.push(parsed.data.role); }
+  if (roleChanged && parsed.data.role === 'admin') await migrateLegacyAdminIfPending(c.env);
   if (updates.length === 0) return c.json({ error: 'Nothing to update' }, 400);
   updates.push('updated_at = ?'); bindings.push(Date.now()); bindings.push(id);
 
-  await c.env.DB.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).bind(...bindings).run();
+  // Demoting the last admin is refused in the same statement that would do it.
+  const where = roleChanged ? `id = ? AND ${KEEPS_AN_ADMIN}` : 'id = ?';
+  if (roleChanged) bindings.push(id);
+  const result = await c.env.DB.prepare(`UPDATE users SET ${updates.join(', ')} WHERE ${where}`).bind(...bindings).run();
+  if (result.meta.changes === 0) return c.json({ error: LAST_ADMIN_ERROR }, 409);
+
+  // Sessions pick the new role up on their next request; ending them makes the change
+  // visible in the UI straight away rather than on the next sign-in.
+  if (roleChanged) {
+    await c.env.DB.prepare('DELETE FROM refresh_tokens WHERE user_sub = ?').bind(user.username).run();
+  }
 
   const updated = await c.env.DB.prepare(
     'SELECT id, username, name, role, must_reset_password, created_at, updated_at FROM users WHERE id = ?'
@@ -120,8 +140,9 @@ users.delete('/:id', async (c) => {
   if (user.username === (c.get('jwtPayload') as JWTPayload).sub) {
     return c.json({ error: 'You cannot delete your own account' }, 403);
   }
+  const deleted = await c.env.DB.prepare(`DELETE FROM users WHERE id = ? AND ${KEEPS_AN_ADMIN}`).bind(id, id).run();
+  if (deleted.meta.changes === 0) return c.json({ error: LAST_ADMIN_ERROR }, 409);
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
     // Sessions and tokens would stop working anyway (the owner can't be resolved), but don't
     // leave them around to come back to life if the username is reused.
     c.env.DB.prepare('DELETE FROM api_tokens WHERE owner_sub = ?').bind(user.username),

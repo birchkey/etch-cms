@@ -1,14 +1,28 @@
 import { useEffect, useState } from 'react';
-import { usersApi, contentTypesApi, CmsUser, ContentType } from '@/lib/api';
+import { usersApi, contentTypesApi, CmsUser, ContentType, UserRole } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Plus, Trash2, KeyRound, Loader2, Users as UsersIcon, Pencil, Shield, RotateCcw } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, Trash2, KeyRound, Loader2, Users as UsersIcon, Pencil, Shield, RotateCcw, UserCog } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePageTitle } from '@/lib/settings';
+
+const ROLES: Record<UserRole, { label: string; description: string }> = {
+  editor: {
+    label: 'Editor',
+    description: 'Creates and edits entries and assets. Can be limited to specific content types.',
+  },
+  admin: {
+    label: 'Admin',
+    description: 'Full access, including users, content types, settings, webhooks and the audit log.',
+  },
+};
+
+const roleLabel = (role: UserRole) => ROLES[role]?.label ?? 'Editor';
 
 export default function Users() {
   usePageTitle('Users');
@@ -19,6 +33,7 @@ export default function Users() {
   const [resetTarget, setResetTarget] = useState<CmsUser | null>(null);
   const [editNameTarget, setEditNameTarget] = useState<CmsUser | null>(null);
   const [permissionsTarget, setPermissionsTarget] = useState<CmsUser | null>(null);
+  const [roleTarget, setRoleTarget] = useState<CmsUser | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [clearingReset, setClearingReset] = useState<string | null>(null);
 
@@ -49,8 +64,8 @@ export default function Users() {
       await usersApi.delete(user.id);
       setUsers(prev => prev.filter(u => u.id !== user.id));
       toast.success('User removed');
-    } catch {
-      toast.error('Delete failed');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
     } finally {
       setDeleting(null);
     }
@@ -61,11 +76,11 @@ export default function Users() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">Users</h1>
-          <p className="text-zinc-500 text-sm mt-1">Manage editor accounts.</p>
+          <p className="text-zinc-500 text-sm mt-1">Manage who can sign in and what they can do.</p>
         </div>
         <Button size="sm" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          Add Editor
+          Add User
         </Button>
       </div>
 
@@ -76,11 +91,11 @@ export default function Users() {
       ) : users.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-xl border border-dashed border-zinc-200">
           <UsersIcon className="h-12 w-12 text-zinc-300 mx-auto mb-4" />
-          <p className="text-zinc-600 font-medium">No editors yet</p>
-          <p className="text-zinc-400 text-sm mt-1 mb-6">Add an editor to let others manage content.</p>
+          <p className="text-zinc-600 font-medium">No users yet</p>
+          <p className="text-zinc-400 text-sm mt-1 mb-6">Add a user to let others manage content.</p>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
-            Add Editor
+            Add User
           </Button>
         </div>
       ) : (
@@ -100,7 +115,7 @@ export default function Users() {
                     )}
                   </div>
                   <p className="text-xs text-zinc-400">
-                    {user.name ? `${user.username} · ` : ''}Editor · Added {new Date(user.created_at).toLocaleDateString()}
+                    {user.name ? `${user.username} · ` : ''}{roleLabel(user.role)} · Added {new Date(user.created_at).toLocaleDateString()}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
@@ -115,11 +130,21 @@ export default function Users() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    title="Manage permissions"
-                    onClick={() => setPermissionsTarget(user)}
+                    title="Change role"
+                    onClick={() => setRoleTarget(user)}
                   >
-                    <Shield className="h-4 w-4 text-zinc-500" />
+                    <UserCog className="h-4 w-4 text-zinc-500" />
                   </Button>
+                  {user.role !== 'admin' && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Manage permissions"
+                      onClick={() => setPermissionsTarget(user)}
+                    >
+                      <Shield className="h-4 w-4 text-zinc-500" />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -188,6 +213,16 @@ export default function Users() {
         user={permissionsTarget}
         onClose={() => setPermissionsTarget(null)}
       />
+
+      <ChangeRoleDialog
+        user={roleTarget}
+        isSelf={roleTarget?.username === currentUsername}
+        onClose={() => setRoleTarget(null)}
+        onSaved={updated => {
+          setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+          setRoleTarget(null);
+        }}
+      />
     </div>
   );
 }
@@ -202,17 +237,19 @@ function CreateUserDialog({
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<UserRole>('editor');
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const user = await usersApi.create(username, password, name);
-      toast.success(`Editor "${user.name || user.username}" created`);
+      const user = await usersApi.create(username, password, name, role);
+      toast.success(`${roleLabel(user.role)} "${user.name || user.username}" created`);
       setName('');
       setUsername('');
       setPassword('');
+      setRole('editor');
       onCreated(user);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create user');
@@ -225,7 +262,7 @@ function CreateUserDialog({
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add Editor</DialogTitle>
+          <DialogTitle>Add User</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
@@ -257,6 +294,7 @@ function CreateUserDialog({
               minLength={8}
             />
           </div>
+          <RoleField value={role} onChange={setRole} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
@@ -499,6 +537,93 @@ function ResetPasswordDialog({ user, onClose, onReset }: { user: CmsUser | null;
             <Button type="submit" disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Update Password
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RoleField({ value, onChange }: { value: UserRole; onChange: (role: UserRole) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="role-select">Role</Label>
+      <Select value={value} onValueChange={v => onChange(v as UserRole)}>
+        <SelectTrigger id="role-select">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {(Object.keys(ROLES) as UserRole[]).map(r => (
+            <SelectItem key={r} value={r}>{ROLES[r].label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-zinc-500">{ROLES[value].description}</p>
+    </div>
+  );
+}
+
+function ChangeRoleDialog({
+  user, isSelf, onClose, onSaved,
+}: {
+  user: CmsUser | null;
+  isSelf: boolean;
+  onClose: () => void;
+  onSaved: (user: CmsUser) => void;
+}) {
+  const { logout } = useAuth();
+  const [role, setRole] = useState<UserRole>('editor');
+  const [saving, setSaving] = useState(false);
+
+  // Seed from the user being opened, during render so the previous user's role never shows.
+  const [seededUser, setSeededUser] = useState(user);
+  if (seededUser !== user) {
+    setSeededUser(user);
+    if (user) setRole(user.role);
+  }
+
+  const unchanged = !!user && role === user.role;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || unchanged) return;
+    setSaving(true);
+    try {
+      const updated = await usersApi.setRole(user.id, role);
+      if (isSelf) {
+        // Your session was ended by the change; sign in again to pick up the new role.
+        toast.success(`You're now ${role === 'admin' ? 'an admin' : 'an editor'}. Sign in again to continue.`);
+        logout();
+        return;
+      }
+      toast.success(`${updated.username} is now ${role === 'admin' ? 'an admin' : 'an editor'}. They'll be asked to sign in again.`);
+      onSaved(updated);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to change role');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!user} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Change Role — {user?.username}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <RoleField value={role} onChange={setRole} />
+          {isSelf && role !== user?.role && (
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-md px-3 py-2">
+              This is your own account. You'll lose admin access and be signed out.
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={saving || unchanged}>
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save
             </Button>
           </DialogFooter>
         </form>

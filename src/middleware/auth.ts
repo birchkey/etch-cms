@@ -2,6 +2,7 @@ import { Context, Next } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { Env, JWTPayload } from '../types';
 import { API_TOKEN_PREFIX, verifyApiToken } from '../lib/api-tokens';
+import { resolveUser } from '../lib/users';
 
 type AuthVariables = { jwtPayload: JWTPayload };
 
@@ -135,6 +136,19 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return diff === 0;
 }
 
+// A session JWT proves who signed in, but not what they may do now: the user is re-read on
+// every request, so deleting a user or changing their role takes effect immediately rather
+// than when their access token expires.
+async function verifySession(env: Env, token: string): Promise<JWTPayload | null> {
+  const payload = await verifyJWT(token, env.JWT_SECRET);
+  if (!payload) return null;
+  const user = await resolveUser(env, payload.sub);
+  // A token issued before the account existed belongs to an earlier user with the same name.
+  // iat has one-second resolution, so compare in seconds.
+  if (!user || payload.iat < Math.floor(user.created_at / 1000)) return null;
+  return { ...payload, role: user.role, name: user.name };
+}
+
 export async function authMiddleware(c: Context<{ Bindings: Env; Variables: AuthVariables }>, next: Next) {
   // Prefer HttpOnly cookie; fall back to Bearer for programmatic access, which accepts
   // either an API token (etch_…) or a session JWT.
@@ -148,7 +162,7 @@ export async function authMiddleware(c: Context<{ Bindings: Env; Variables: Auth
 
   const payload = token.startsWith(API_TOKEN_PREFIX)
     ? await verifyApiToken(c.env, token, p => c.executionCtx.waitUntil(p))
-    : await verifyJWT(token, c.env.JWT_SECRET);
+    : await verifySession(c.env, token);
   if (!payload) return c.json({ error: 'Unauthorized' }, 401);
 
   c.set('jwtPayload', payload);

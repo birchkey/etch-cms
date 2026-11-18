@@ -1,8 +1,9 @@
 export interface Env {
   DB: D1Database;
   ASSETS_BUCKET: R2Bucket;
-  ADMIN_USERNAME: string;
-  ADMIN_PASSWORD_HASH: string;
+  // Retired: only honoured until the first database admin exists (see lib/users.ts).
+  ADMIN_USERNAME?: string;
+  ADMIN_PASSWORD_HASH?: string;
   JWT_SECRET: string;
   __STATIC_CONTENT: KVNamespace;
   PUBLIC_API_KEY?: string; // optional — if set, all /api/public/* requests require Authorization: Bearer <key>
@@ -108,7 +109,7 @@ export interface UserRow {
   username: string;
   name: string;
   password_hash: string;
-  role: 'editor';
+  role: string; // not constrained in the database; read it through normalizeRole()
   must_reset_password: number; // 0 or 1
   created_at: number;
   updated_at: number;
@@ -127,9 +128,11 @@ export interface ApiTokenRow {
 
 // JWT payload. Also used as the request identity when authenticating with an API token,
 // in which case token_id is set (and iat/exp are 0 — tokens carry their own expiry).
+export type Role = 'admin' | 'editor';
+
 export interface JWTPayload {
   sub: string;
-  role: 'admin' | 'editor';
+  role: Role;
   name?: string;
   iat: number;
   exp: number;

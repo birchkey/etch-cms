@@ -1,4 +1,5 @@
 import { Env, ApiTokenRow, JWTPayload } from '../types';
+import { resolveUser } from './users';
 
 // Every token starts with this prefix, which is how the auth middleware tells an API
 // token apart from a session JWT, and makes leaked tokens easy to grep for.
@@ -42,17 +43,11 @@ export async function verifyApiToken(
   const now = Date.now();
   if (row.expires_at !== null && row.expires_at <= now) return null;
 
-  let identity: JWTPayload;
-  if (row.owner_sub === env.ADMIN_USERNAME) {
-    identity = { sub: row.owner_sub, role: 'admin', iat: 0, exp: 0, token_id: row.id };
-  } else {
-    const user = await env.DB.prepare('SELECT username, name, role, created_at FROM users WHERE username = ?')
-      .bind(row.owner_sub).first<{ username: string; name: string; role: 'editor'; created_at: number }>();
-    // Owner deleted, or this was an admin token and ADMIN_USERNAME has since changed. A token
-    // older than the account belongs to an earlier, deleted user with the same name.
-    if (!user || row.created_at < user.created_at) return null;
-    identity = { sub: user.username, role: user.role, name: user.name || undefined, iat: 0, exp: 0, token_id: row.id };
-  }
+  // Owner deleted, or (for the retired environment admin) a database admin now exists. A
+  // token older than the account belongs to an earlier, deleted user with the same name.
+  const user = await resolveUser(env, row.owner_sub);
+  if (!user || row.created_at < user.created_at) return null;
+  const identity: JWTPayload = { sub: user.username, role: user.role, name: user.name, iat: 0, exp: 0, token_id: row.id };
 
   if (row.last_used_at === null || now - row.last_used_at > LAST_USED_THROTTLE_MS) {
     waitUntil(env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').bind(now, row.id).run());

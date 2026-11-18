@@ -4,6 +4,8 @@ import { Env, UserRow, JWTPayload } from '../types';
 import { signJWT, verifyPassword, hashPassword, authMiddleware, sessionOnly } from '../middleware/auth';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate';
+import { legacyAdminActive, migrateLegacyAdmin, normalizeRole, resolveUser } from '../lib/users';
+import { logAudit } from '../lib/audit';
 
 const ACCESS_COOKIE = 'etch_access';
 const REFRESH_COOKIE = 'etch_refresh';
@@ -84,24 +86,26 @@ auth.post('/login', async (c) => {
     return c.json({ error: 'Too many login attempts. Try again later.' }, { status: 429, headers: { 'Retry-After': String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)) } });
   }
 
-  // Check hardcoded admin credentials first
-  if (body.username === c.env.ADMIN_USERNAME) {
-    const valid = await verifyPassword(body.password, c.env.ADMIN_PASSWORD_HASH);
-    if (!valid) {
-      await c.env.DB.prepare('INSERT INTO login_attempts (ip, attempted_at) VALUES (?, ?)').bind(ip, nowMs).run();
-      return c.json({ error: 'Invalid credentials' }, 401);
-    }
-
-    await c.env.DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run();
-    const { token, refreshToken } = await createTokens(c.env.DB, c.env.JWT_SECRET, body.username, 'admin');
-    setAuthCookies(c, token, refreshToken);
-    return c.json({ role: 'admin', username: body.username, name: null });
-  }
-
-  // Check D1 editor users
-  const user = await c.env.DB.prepare(
+  let user = await c.env.DB.prepare(
     'SELECT * FROM users WHERE username = ?'
   ).bind(body.username).first<UserRow>();
+  let verified = false;
+
+  // The retired environment admin signs in one last time: its first successful sign-in
+  // copies it into the users table, after which the secrets are ignored.
+  if (await legacyAdminActive(c.env, body.username)
+      && await verifyPassword(body.password, c.env.ADMIN_PASSWORD_HASH!)) {
+    if (user) {
+      return c.json({
+        error: 'An editor account already uses the admin username, so the admin can\'t be moved into the database. Create an admin with `npm run admin:reset`.',
+      }, 409);
+    }
+    user = await migrateLegacyAdmin(c.env);
+    verified = !!user;
+    if (user) {
+      void logAudit(c.env.DB, { sub: user.username, role: 'admin', iat: 0, exp: 0 }, 'user.migrate_admin', 'user', user.id, user.username).catch(() => {});
+    }
+  }
 
   if (!user) {
     // Run a dummy verification so non-existent usernames take the same time as wrong passwords,
@@ -111,8 +115,7 @@ auth.post('/login', async (c) => {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
-  const valid = await verifyPassword(body.password, user.password_hash);
-  if (!valid) {
+  if (!verified && !(await verifyPassword(body.password, user.password_hash))) {
     await c.env.DB.prepare('INSERT INTO login_attempts (ip, attempted_at) VALUES (?, ?)').bind(ip, nowMs).run();
     return c.json({ error: 'Invalid credentials' }, 401);
   }
@@ -120,9 +123,10 @@ auth.post('/login', async (c) => {
   // Clear attempts on successful login
   await c.env.DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run();
 
-  const { token, refreshToken } = await createTokens(c.env.DB, c.env.JWT_SECRET, user.username, user.role, user.name || undefined);
+  const role = normalizeRole(user.role);
+  const { token, refreshToken } = await createTokens(c.env.DB, c.env.JWT_SECRET, user.username, role, user.name || undefined);
   setAuthCookies(c, token, refreshToken);
-  return c.json({ role: user.role, username: user.username, name: user.name || null, must_reset_password: user.must_reset_password === 1 });
+  return c.json({ role, username: user.username, name: user.name || null, must_reset_password: user.must_reset_password === 1 });
 });
 
 auth.post('/refresh', async (c) => {
@@ -155,20 +159,13 @@ auth.post('/refresh', async (c) => {
 
   // Re-resolve the user on every refresh, so deleting a user or changing their role takes
   // effect within one access-token lifetime instead of surviving on rotated refresh tokens.
-  let identity: { role: 'admin' | 'editor'; name?: string };
-  if (row.user_role === 'admin' && row.user_sub === c.env.ADMIN_USERNAME) {
-    identity = { role: 'admin' };
-  } else {
-    const user = await c.env.DB.prepare(
-      'SELECT username, name, role, created_at FROM users WHERE username = ?'
-    ).bind(row.user_sub).first<Pick<UserRow, 'username' | 'name' | 'role' | 'created_at'>>();
-    // A token older than the account belongs to an earlier, deleted user with the same name.
-    if (!user || row.created_at < user.created_at) {
-      clearAuthCookies(c);
-      return c.json({ error: 'Invalid or expired refresh token' }, 401);
-    }
-    identity = { role: user.role, name: user.name || undefined };
+  const user = await resolveUser(c.env, row.user_sub);
+  // A token older than the account belongs to an earlier, deleted user with the same name.
+  if (!user || row.created_at < user.created_at) {
+    clearAuthCookies(c);
+    return c.json({ error: 'Invalid or expired refresh token' }, 401);
   }
+  const identity = { role: user.role, name: user.name };
 
   const { token, refreshToken: newRefreshToken } = await createTokens(
     c.env.DB, c.env.JWT_SECRET, row.user_sub, identity.role, identity.name,
@@ -187,13 +184,9 @@ auth.delete('/logout', async (c) => {
   return c.json({ ok: true });
 });
 
-// PATCH /api/auth/password — change own password (editor accounts only)
+// PATCH /api/auth/password — change own password
 auth.patch('/password', authMiddleware, sessionOnly, async (c) => {
   const payload = c.get('jwtPayload');
-
-  if (payload.role === 'admin') {
-    return c.json({ error: 'Admin password must be changed via: wrangler secret put ADMIN_PASSWORD_HASH' }, 400);
-  }
 
   const raw = await c.req.json().catch(() => null);
   const pwParsed = parseBody(ChangePasswordSchema, raw);
