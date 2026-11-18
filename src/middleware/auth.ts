@@ -1,6 +1,7 @@
 import { Context, Next } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { Env, JWTPayload } from '../types';
+import { API_TOKEN_PREFIX, verifyApiToken } from '../lib/api-tokens';
 
 type AuthVariables = { jwtPayload: JWTPayload };
 
@@ -135,19 +136,31 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export async function authMiddleware(c: Context<{ Bindings: Env; Variables: AuthVariables }>, next: Next) {
-  // Prefer HttpOnly cookie; fall back to Bearer token for programmatic API access
+  // Prefer HttpOnly cookie; fall back to Bearer for programmatic access, which accepts
+  // either an API token (etch_…) or a session JWT.
   let token = getCookie(c, 'etch_access');
   if (!token) {
     const authHeader = c.req.header('Authorization');
-    if (authHeader?.startsWith('Bearer ')) token = authHeader.slice(7);
+    if (authHeader?.startsWith('Bearer ')) token = authHeader.slice(7).trim();
   }
 
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
 
-  const payload = await verifyJWT(token, c.env.JWT_SECRET);
+  const payload = token.startsWith(API_TOKEN_PREFIX)
+    ? await verifyApiToken(c.env, token, p => c.executionCtx.waitUntil(p))
+    : await verifyJWT(token, c.env.JWT_SECRET);
   if (!payload) return c.json({ error: 'Unauthorized' }, 401);
 
   c.set('jwtPayload', payload);
+  await next();
+}
+
+// Blocks requests authenticated with an API token. Used for actions a leaked token must
+// not be able to perform: minting more tokens and changing passwords.
+export async function sessionOnly(c: Context<{ Bindings: Env; Variables: AuthVariables }>, next: Next) {
+  if (c.get('jwtPayload').token_id) {
+    return c.json({ error: 'This action requires signing in; API tokens cannot be used' }, 403);
+  }
   await next();
 }
 

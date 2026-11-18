@@ -1,7 +1,7 @@
 import { Hono, Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { Env, UserRow, JWTPayload } from '../types';
-import { signJWT, verifyPassword, hashPassword, authMiddleware } from '../middleware/auth';
+import { signJWT, verifyPassword, hashPassword, authMiddleware, sessionOnly } from '../middleware/auth';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate';
 
@@ -172,7 +172,7 @@ auth.delete('/logout', async (c) => {
 });
 
 // PATCH /api/auth/password — change own password (editor accounts only)
-auth.patch('/password', authMiddleware, async (c) => {
+auth.patch('/password', authMiddleware, sessionOnly, async (c) => {
   const payload = c.get('jwtPayload');
 
   if (payload.role === 'admin') {

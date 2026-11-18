@@ -16,6 +16,7 @@ import {
   KeyRound,
   Zap,
   History,
+  KeySquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
@@ -162,6 +163,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         {navItem('/assets', <Image className="h-4 w-4" />, 'Assets')}
         {isAdmin && navItem('/users', <Users className="h-4 w-4" />, 'Users')}
         {isAdmin && navItem('/webhooks', <Zap className="h-4 w-4" />, 'Webhooks')}
+        {navItem('/api-tokens', <KeySquare className="h-4 w-4" />, 'API Tokens')}
         {isAdmin && navItem('/audit-log', <History className="h-4 w-4" />, 'Activity')}
         {isAdmin && navItem('/settings', <Settings className="h-4 w-4" />, 'Settings')}
       </nav>

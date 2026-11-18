@@ -19,6 +19,8 @@ const ACTION_LABELS: Record<string, string> = {
   'content_type.delete': 'Deleted content type',
   'asset.upload': 'Uploaded asset',
   'asset.delete': 'Deleted asset',
+  'api_token.create': 'Created API token',
+  'api_token.revoke': 'Revoked API token',
 };
 
 const FILTER_TABS: [string, string][] = [

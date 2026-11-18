@@ -13,6 +13,7 @@ import Users from '@/pages/Users';
 import Settings from '@/pages/Settings';
 import Webhooks from '@/pages/Webhooks';
 import AuditLog from '@/pages/AuditLog';
+import ApiTokens from '@/pages/ApiTokens';
 import ForceResetPassword from '@/pages/ForceResetPassword';
 import { Toaster } from 'sonner';
 
@@ -58,6 +59,7 @@ function AppRoutes() {
         <Route path="/users" element={<RequireAdmin><Users /></RequireAdmin>} />
         <Route path="/settings" element={<RequireAdmin><Settings /></RequireAdmin>} />
         <Route path="/webhooks" element={<RequireAdmin><Webhooks /></RequireAdmin>} />
+        <Route path="/api-tokens" element={<ApiTokens />} />
         <Route path="/audit-log" element={<RequireAdmin><AuditLog /></RequireAdmin>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -10,6 +10,9 @@ export async function logAudit(
   resourceLabel: string | null,
   details?: Record<string, unknown>
 ): Promise<void> {
+  // Record which API token made the change, so a script's actions can be told apart
+  // from the same user working in the admin UI.
+  if (actor.token_id) details = { ...details, api_token_id: actor.token_id };
   await db.prepare(
     `INSERT INTO audit_logs (id, actor_id, actor_name, actor_role, action, resource_type, resource_id, resource_label, details, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

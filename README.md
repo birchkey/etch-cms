@@ -465,7 +465,14 @@ All `/api/public/` endpoints are unauthenticated and CORS-enabled for cross-orig
 
 ## Admin API Reference
 
-All `/api/` endpoints require a `Bearer <token>` in the `Authorization` header. Obtain a token via `POST /api/auth/login`.
+The admin UI authenticates with session cookies. For scripts, integrations and agents, create an **API token** under **API Tokens** in the sidebar and send it in the `Authorization` header:
+
+```bash
+curl https://your-worker.workers.dev/api/content-types \
+  -H "Authorization: Bearer etch_…"
+```
+
+A token acts as the user who created it, with the same role and content-type permissions, checked on every request. Deleting the user or changing their permissions takes effect immediately. Tokens are shown once at creation, stored only as a hash, can be set to expire, and can be revoked by their owner or any admin. Changes made with a token are recorded in the activity log with the token's ID. A token can't create other tokens or change a password; those require signing in.
 
 Editors can create and edit entries. Admins can additionally manage content types, users, webhooks, and settings.
 
@@ -524,6 +531,10 @@ GET    /api/webhooks/:id/deliveries                (admin)
 POST   /api/webhooks/:id/test                      (admin)
 
 GET    /api/audit-logs                             (admin)
+
+GET    /api/tokens                                 (your tokens; admins see all)
+POST   /api/tokens                                 (signed-in session only)
+DELETE /api/tokens/:id                             (owner or admin)
 ```
 
 The preview endpoint uses its own token auth (not Bearer) and is CORS-enabled:

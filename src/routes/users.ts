@@ -120,7 +120,12 @@ users.delete('/:id', async (c) => {
   if (user.username === (c.get('jwtPayload') as JWTPayload).sub) {
     return c.json({ error: 'You cannot delete your own account' }, 403);
   }
-  await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
+    // Tokens would stop working anyway (the owner can't be resolved), but don't leave
+    // them around to come back to life if the username is reused.
+    c.env.DB.prepare('DELETE FROM api_tokens WHERE owner_sub = ?').bind(user.username),
+  ]);
   void logAudit(c.env.DB, c.get('jwtPayload') as JWTPayload, 'user.delete', 'user', id, user.username).catch(() => {});
   return c.json({ ok: true });
 });

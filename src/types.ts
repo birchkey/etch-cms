@@ -114,11 +114,24 @@ export interface UserRow {
   updated_at: number;
 }
 
-// JWT payload
+export interface ApiTokenRow {
+  id: string;
+  name: string;
+  token_hash: string;
+  token_hint: string;
+  owner_sub: string;
+  expires_at: number | null;
+  last_used_at: number | null;
+  created_at: number;
+}
+
+// JWT payload. Also used as the request identity when authenticating with an API token,
+// in which case token_id is set (and iat/exp are 0 — tokens carry their own expiry).
 export interface JWTPayload {
   sub: string;
   role: 'admin' | 'editor';
   name?: string;
   iat: number;
   exp: number;
+  token_id?: string;
 }

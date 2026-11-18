@@ -365,6 +365,29 @@ export const webhooksApi = {
     request<{ ok: boolean; status?: number; error?: string }>(`/webhooks/${id}/test`, { method: 'POST' }),
 };
 
+// API tokens
+export interface ApiToken {
+  id: string;
+  name: string;
+  token_hint: string; // first characters only, e.g. "etch_Ab3x"
+  owner_sub: string;
+  expires_at: number | null;
+  last_used_at: number | null;
+  created_at: number;
+}
+
+// Returned only on creation — contains the full token (shown once)
+export interface ApiTokenCreated extends ApiToken {
+  token: string;
+}
+
+export const apiTokensApi = {
+  list: () => request<ApiToken[]>('/tokens'),
+  create: (data: { name: string; expires_in_days: number | null }) =>
+    request<ApiTokenCreated>('/tokens', { method: 'POST', body: JSON.stringify(data) }),
+  revoke: (id: string) => request<{ ok: true }>(`/tokens/${id}`, { method: 'DELETE' }),
+};
+
 // Audit Log
 export interface AuditLog {
   id: string;
