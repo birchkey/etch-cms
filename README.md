@@ -670,12 +670,68 @@ For a large library, copy the files into the R2 bucket under `assets/` first (wi
 
 ## MCP Server
 
-Etch includes an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so AI agents such as Claude can read your content model, import images and create and publish entries. Connect with an [API token](#admin-api-reference). The agent acts as the token's owner, with the same role, content-type permissions and activity-log attribution as any other API client.
+Etch includes an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so AI agents such as Claude can read your content model, import images and create and publish entries. It uses the Streamable HTTP transport and authenticates with an [API token](#admin-api-reference).
+
+### Setting it up
+
+1. **Deploy.** The MCP server ships with the Worker, and `npm run deploy` applies the database migration it needs (`0014_asset_source_url.sql`). Nothing else needs enabling.
+2. **Create an API token.** Sign in, open **API Tokens** in the sidebar, and create one named for the agent (e.g. "Claude import"). Copy it now; it's shown only once. The agent acts as the user who created the token: an editor's token can only reach the content types that editor can, and everything the agent does is logged under that user. For a one-off import, set an expiry, or revoke the token when you're done.
+3. **Add the server to your client**, as below. Keep the token out of files you commit.
+4. **Check the connection.** In Claude Code, run `/mcp`; `etch` should show as connected with 10 tools. A **401** means the token is wrong, expired or revoked, or was sent without the `Bearer ` prefix.
+
+**Claude Code**
 
 ```bash
 claude mcp add --transport http etch https://your-worker.workers.dev/mcp \
   --header "Authorization: Bearer etch_…"
 ```
+
+That adds it for you in the current project. Add `--scope user` to use it in every project. To share the setup with a team through a committed `.mcp.json` (`--scope project`), reference an environment variable instead of pasting the token, and have each person set `ETCH_TOKEN`:
+
+```json
+{
+  "mcpServers": {
+    "etch": {
+      "type": "http",
+      "url": "https://your-worker.workers.dev/mcp",
+      "headers": { "Authorization": "Bearer ${ETCH_TOKEN}" }
+    }
+  }
+}
+```
+
+**Cursor and other clients that take a URL and headers.** For example, in `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "etch": {
+      "url": "https://your-worker.workers.dev/mcp",
+      "headers": { "Authorization": "Bearer etch_…" }
+    }
+  }
+}
+```
+
+**Clients that only launch local servers.** Use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge, which needs Node.js:
+
+```json
+{
+  "mcpServers": {
+    "etch": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://your-worker.workers.dev/mcp", "--header", "Authorization:${ETCH_AUTH}"],
+      "env": { "ETCH_AUTH": "Bearer etch_…" }
+    }
+  }
+}
+```
+
+Custom connectors on claude.ai sign in with OAuth, which Etch doesn't support yet, so they can't connect.
+
+**Local development.** With `npm run dev` running, use `http://localhost:8787/mcp` and a token created in your local instance. Tokens from production don't work locally, and local tokens don't work in production.
+
+### Tools
 
 | Tool | What it does |
 |------|--------------|
@@ -688,7 +744,7 @@ claude mcp add --transport http etch https://your-worker.workers.dev/mcp \
 
 Every tool goes through the admin API, so the rules above apply unchanged. Admin-only actions (content types, users, settings, webhooks) and deleting things aren't available through MCP. Publishing fires webhooks as usual, so for a large import have the agent create everything as drafts and publish at the end.
 
-The endpoint accepts API tokens only, not session cookies. Clients that sign in with OAuth, such as custom connectors on claude.ai, aren't supported yet.
+The endpoint accepts API tokens only, not session cookies.
 
 ---
 
