@@ -6,7 +6,17 @@ export function parseFieldValue(value: string | null, type: string): unknown {
   if (value === null) return null;
   if (type === 'number') return Number(value);
   if (type === 'boolean') return value === 'true';
-  if (type === 'relation' || type === 'select' || type === 'image' || type === 'repeater') {
+  // Select and image store a single value as a plain string and multiple values as a JSON
+  // array. Only accept an array from JSON.parse: otherwise a single option like "2024",
+  // "true" or "null" would come back as a number, boolean or null instead of the string.
+  if (type === 'select' || type === 'image') {
+    if (!value.startsWith('[')) return value;
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : value;
+    } catch { return value; }
+  }
+  if (type === 'relation' || type === 'repeater') {
     try { return JSON.parse(value); } catch { return value; }
   }
   if (type === 'datetime') {

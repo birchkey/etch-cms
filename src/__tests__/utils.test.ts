@@ -85,4 +85,24 @@ describe('parseFieldValue', () => {
   it('returns plain string for single select', () => {
     expect(parseFieldValue('Draft', 'select')).toBe('Draft');
   });
+
+  it('keeps single select options that look like JSON as strings', () => {
+    expect(parseFieldValue('2024', 'select')).toBe('2024');
+    expect(parseFieldValue('true', 'select')).toBe('true');
+    expect(parseFieldValue('null', 'select')).toBe('null');
+    expect(parseFieldValue('"quoted"', 'select')).toBe('"quoted"');
+  });
+
+  it('keeps a single select option starting with a bracket that is not an array', () => {
+    expect(parseFieldValue('[beta]', 'select')).toBe('[beta]');
+  });
+
+  it('parses multi-select options that look like numbers as strings', () => {
+    expect(parseFieldValue('["2024","2025"]', 'select')).toEqual(['2024', '2025']);
+  });
+
+  it('returns a single image path as a string and multiple as an array', () => {
+    expect(parseFieldValue('/r2/abc.jpg', 'image')).toBe('/r2/abc.jpg');
+    expect(parseFieldValue('["/r2/a.jpg","/r2/b.jpg"]', 'image')).toEqual(['/r2/a.jpg', '/r2/b.jpg']);
+  });
 });
