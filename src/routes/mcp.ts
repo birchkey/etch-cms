@@ -14,6 +14,7 @@ import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validatio
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { Env, AssetRow, ContentTypeRow, FieldRow } from '../types';
 import { API_TOKEN_PREFIX, verifyApiToken } from '../lib/api-tokens';
+import { version } from '../../package.json';
 
 // The app the tools send their API requests to: the Worker's own app in production.
 export type ApiApp = Pick<Hono<{ Bindings: Env }>, 'fetch'>;
@@ -114,7 +115,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number
 
 export function buildServer(api: Api): McpServer {
   const server = new McpServer(
-    { name: 'etch-cms', version: '0.2.0' },
+    { name: 'etch-cms', version },
     { instructions: INSTRUCTIONS, jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
   );
 
